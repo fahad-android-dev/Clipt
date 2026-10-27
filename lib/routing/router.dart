@@ -3,11 +3,14 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../data/repositories/session_repository.dart';
+import '../data/repositories/video_repository.dart';
 import '../ui/core/widgets/view_model_host.dart';
 import '../ui/home/home_screen.dart';
 import '../ui/home/home_view_model.dart';
 import '../ui/live_session/live_session_screen.dart';
 import '../ui/live_session/live_session_view_model.dart';
+import '../ui/review/review_screen.dart';
+import '../ui/review/review_view_model.dart';
 import 'routes.dart';
 
 GoRouter createRouter() {
@@ -19,6 +22,7 @@ GoRouter createRouter() {
         builder: (context, state) => ViewModelHost<HomeViewModel>(
           create: (c) => HomeViewModel(
             sessionRepository: c.read<SessionRepository>(),
+            videoRepository: c.read<VideoRepository>(),
           ),
           builder: (c, viewModel) => HomeScreen(viewModel: viewModel),
         ),
@@ -34,6 +38,21 @@ GoRouter createRouter() {
               sessionId: id,
             ),
             builder: (c, viewModel) => LiveSessionScreen(viewModel: viewModel),
+          );
+        },
+      ),
+      GoRoute(
+        path: Routes.review,
+        builder: (context, state) {
+          final id = int.tryParse(state.pathParameters['id'] ?? '') ?? -1;
+          return ViewModelHost<ReviewViewModel>(
+            key: ValueKey('review-$id'),
+            create: (c) => ReviewViewModel(
+              sessionRepository: c.read<SessionRepository>(),
+              videoRepository: c.read<VideoRepository>(),
+              sessionId: id,
+            )..load(),
+            builder: (c, viewModel) => ReviewScreen(viewModel: viewModel),
           );
         },
       ),

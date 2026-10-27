@@ -11,19 +11,26 @@ class LocalSessionRepository implements SessionRepository {
 
   @override
   Stream<List<Session>> watchSessions() {
-    return _db
-        .watchSessionRows()
-        .map((rows) => rows.map(_toSession).toList(growable: false));
+    return _db.watchSessionRows().map(
+      (rows) => rows.map(_toSession).toList(growable: false),
+    );
   }
 
   @override
-  Future<Session> startSession(String title) async {
-    final startedAt = DateTime.now();
+  Future<Session> createSession(String title) async {
+    final createdAt = DateTime.now();
     final id = await _db.insertSession(
       title: title,
-      startedAtMs: startedAt.millisecondsSinceEpoch,
+      createdAtMs: createdAt.millisecondsSinceEpoch,
     );
-    return Session(id: id, title: title, startedAt: startedAt);
+    return Session(id: id, title: title, createdAt: createdAt);
+  }
+
+  @override
+  Future<void> startSession(int id) async {
+    final row = await _db.findSessionRow(id);
+    if (row == null || row.startedAtMs != null) return; // missing or started
+    await _db.setSessionStarted(id, DateTime.now().millisecondsSinceEpoch);
   }
 
   @override
@@ -35,9 +42,29 @@ class LocalSessionRepository implements SessionRepository {
   @override
   Future<void> endSession(int id) async {
     final row = await _db.findSessionRow(id);
-    if (row == null || row.endedAtMs != null) return; // missing or already ended
+    if (row == null || row.startedAtMs == null || row.endedAtMs != null) {
+      return; // missing, never started, or already ended
+    }
     await _db.setSessionEnded(id, DateTime.now().millisecondsSinceEpoch);
   }
+
+  @override
+  Future<void> deleteSession(int id) => _db.deleteSessionWithMarks(id);
+
+  @override
+  Future<void> updateSessionDelay(int id, int seconds) =>
+      _db.setSessionDelay(id, seconds);
+
+  @override
+  Future<void> updateMarkTag(int markId, String tag) =>
+      _db.setMarkTag(markId, tag);
+
+  @override
+  Future<void> setVideo(int id, String? fileName) =>
+      _db.setSessionVideo(id, fileName);
+
+  @override
+  Future<void> deleteMark(int markId) => _db.deleteMarkRow(markId);
 
   @override
   Future<void> addMark({
@@ -56,24 +83,22 @@ class LocalSessionRepository implements SessionRepository {
 
   // Database rows -> domain models. The rest of the app never sees rows.
 
+  DateTime? _fromMs(int? ms) =>
+      ms == null ? null : DateTime.fromMillisecondsSinceEpoch(ms);
+
   Session _toSession(SessionRow r) {
     return Session(
       id: r.id,
       title: r.title,
-      startedAt: DateTime.fromMillisecondsSinceEpoch(r.startedAtMs),
-      endedAt: r.endedAtMs == null
-          ? null
-          : DateTime.fromMillisecondsSinceEpoch(r.endedAtMs!),
+      createdAt: DateTime.fromMillisecondsSinceEpoch(r.createdAtMs),
+      startedAt: _fromMs(r.startedAtMs),
+      endedAt: _fromMs(r.endedAtMs),
       delaySeconds: r.delaySeconds,
+      videoFile: r.videoFile,
     );
   }
 
   Mark _toMark(MarkRow r) {
-    return Mark(
-      id: r.id,
-      sessionId: r.sessionId,
-      atMs: r.atMs,
-      tag: r.tag,
-    );
+    return Mark(id: r.id, sessionId: r.sessionId, atMs: r.atMs, tag: r.tag);
   }
 }

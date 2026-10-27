@@ -1,0 +1,1 @@
+const markTags = ['Clutch', 'Funny', 'Fail'];

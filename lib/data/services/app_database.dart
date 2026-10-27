@@ -12,9 +12,13 @@ class SessionsTable extends Table {
   TextColumn get title => text()();
 
   /// Epoch milliseconds, so timing keeps millisecond precision.
-  IntColumn get startedAtMs => integer()();
+  IntColumn get createdAtMs => integer()();
+
+  /// Null until the user presses Start.
+  IntColumn get startedAtMs => integer().nullable()();
   IntColumn get endedAtMs => integer().nullable()();
   IntColumn get delaySeconds => integer().withDefault(const Constant(8))();
+  TextColumn get videoFile => text().nullable()();
 }
 
 @DataClassName('MarkRow')
@@ -30,49 +34,75 @@ class MarksTable extends Table {
   TextColumn get tag => text().withDefault(const Constant('Highlight'))();
 }
 
-/// Service for the local SQLite data source. Knows nothing about the UI or
-/// the domain models: repositories map these rows to domain objects.
 @DriftDatabase(tables: [SessionsTable, MarksTable])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(driftDatabase(name: 'clipt'));
 
-  /// For tests: pass an in-memory executor.
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
-        beforeOpen: (details) async {
-          await customStatement('PRAGMA foreign_keys = ON');
-        },
-      );
+    onUpgrade: (m, from, to) async {
+      // Handle migration from old schema (version 1) to new schema
+      if (from < 2) {
+        // Delete old tables and recreate with new schema
+        await m.deleteTable('marks');
+        await m.deleteTable('sessions');
+        // Recreate tables using the Migrator
+        await m.createTable(sessionsTable);
+        await m.createTable(marksTable);
+        return;
+      }
+      // Add videoFile column for version 3
+      if (from < 3) {
+        await m.addColumn(sessionsTable, sessionsTable.videoFile);
+      }
+    },
+    beforeOpen: (details) async {
+      // Enable foreign keys
+      await customStatement('PRAGMA foreign_keys = ON');
+    },
+  );
 
   Stream<List<SessionRow>> watchSessionRows() {
-    return (select(sessionsTable)
-          ..orderBy([(t) => OrderingTerm.desc(t.startedAtMs)]))
-        .watch();
+    return (select(
+      sessionsTable,
+    )..orderBy([(t) => OrderingTerm.desc(t.createdAtMs)])).watch();
   }
 
-  Future<int> insertSession({
-    required String title,
-    required int startedAtMs,
-  }) {
+  Future<int> insertSession({required String title, required int createdAtMs}) {
     return into(sessionsTable).insert(
-      SessionsTableCompanion.insert(title: title, startedAtMs: startedAtMs),
+      SessionsTableCompanion.insert(title: title, createdAtMs: createdAtMs),
     );
   }
 
   Future<SessionRow?> findSessionRow(int id) {
-    return (select(sessionsTable)..where((t) => t.id.equals(id)))
-        .getSingleOrNull();
+    return (select(
+      sessionsTable,
+    )..where((t) => t.id.equals(id))).getSingleOrNull();
+  }
+
+  Future<void> setSessionStarted(int id, int startedAtMs) {
+    return (update(sessionsTable)..where((t) => t.id.equals(id))).write(
+      SessionsTableCompanion(startedAtMs: Value(startedAtMs)),
+    );
   }
 
   Future<void> setSessionEnded(int id, int endedAtMs) {
     return (update(sessionsTable)..where((t) => t.id.equals(id))).write(
       SessionsTableCompanion(endedAtMs: Value(endedAtMs)),
     );
+  }
+
+  /// Deletes a session and all of its marks together, or neither.
+  Future<void> deleteSessionWithMarks(int id) {
+    return transaction(() async {
+      await (delete(marksTable)..where((t) => t.sessionId.equals(id))).go();
+      await (delete(sessionsTable)..where((t) => t.id.equals(id))).go();
+    });
   }
 
   Future<void> insertMark({
@@ -94,5 +124,27 @@ class AppDatabase extends _$AppDatabase {
           ..where((t) => t.sessionId.equals(sessionId))
           ..orderBy([(t) => OrderingTerm.asc(t.atMs)]))
         .get();
+  }
+
+  Future<void> setSessionDelay(int id, int seconds) {
+    return (update(sessionsTable)..where((t) => t.id.equals(id))).write(
+      SessionsTableCompanion(delaySeconds: Value(seconds)),
+    );
+  }
+
+  Future<void> setSessionVideo(int id, String? fileName) {
+    return (update(sessionsTable)..where((t) => t.id.equals(id))).write(
+      SessionsTableCompanion(videoFile: Value(fileName)),
+    );
+  }
+
+  Future<void> setMarkTag(int markId, String tag) {
+    return (update(marksTable)..where((t) => t.id.equals(markId))).write(
+      MarksTableCompanion(tag: Value(tag)),
+    );
+  }
+
+  Future<void> deleteMarkRow(int markId) {
+    return (delete(marksTable)..where((t) => t.id.equals(markId))).go();
   }
 }

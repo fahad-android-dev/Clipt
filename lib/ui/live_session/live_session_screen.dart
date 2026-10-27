@@ -9,6 +9,7 @@ import '../../utils/formatters.dart';
 import '../core/themes/app_colors.dart';
 import '../core/themes/app_theme.dart';
 import 'live_session_view_model.dart';
+import '../../routing/routes.dart';
 
 class LiveSessionScreen extends StatefulWidget {
   const LiveSessionScreen({super.key, required this.viewModel});
@@ -25,14 +26,22 @@ class _LiveSessionScreenState extends State<LiveSessionScreen> {
   @override
   void initState() {
     super.initState();
-    _vm.load();
-    WakelockPlus.enable(); // keep the screen on while playing
+    _vm.load().then((_) {
+      // Resuming a session that is already running.
+      if (mounted && _vm.isLive) WakelockPlus.enable();
+    });
   }
 
   @override
   void dispose() {
     WakelockPlus.disable();
     super.dispose();
+  }
+
+  Future<void> _onStart() async {
+    HapticFeedback.mediumImpact();
+    await _vm.start();
+    if (_vm.isLive) WakelockPlus.enable(); // keep the screen on while playing
   }
 
   void _onMark() {
@@ -63,7 +72,7 @@ class _LiveSessionScreenState extends State<LiveSessionScreen> {
 
     await _vm.end();
     if (!mounted) return;
-    context.pop();
+    context.pushReplacement(Routes.reviewPath(_vm.sessionId));
   }
 
   @override
@@ -82,8 +91,10 @@ class _LiveSessionScreenState extends State<LiveSessionScreen> {
             body: const Center(child: Text('This session no longer exists.')),
           );
         }
+        // A session that hasn't started can be left freely. A live one asks
+        // before ending.
         return PopScope(
-          canPop: false,
+          canPop: !_vm.isLive,
           onPopInvokedWithResult: (didPop, _) {
             if (!didPop) _confirmEnd();
           },
@@ -97,11 +108,18 @@ class _LiveSessionScreenState extends State<LiveSessionScreen> {
   }
 
   Widget _content() {
+    final live = _vm.isLive;
     final error = _vm.errorMessage;
-    final status = error ??
-        (_vm.markCount == 0
-            ? 'Tap when something cool happens'
-            : '${_vm.markCount} marked, last at ${_vm.lastMark}');
+    final String status;
+    if (error != null) {
+      status = error;
+    } else if (!live) {
+      status = 'Press Start when you begin recording';
+    } else if (_vm.markCount == 0) {
+      status = 'Tap when something cool happens';
+    } else {
+      status = '${_vm.markCount} marked, last at ${_vm.lastMark}';
+    }
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
@@ -112,42 +130,62 @@ class _LiveSessionScreenState extends State<LiveSessionScreen> {
           const SizedBox(height: 8),
           Text(
             status,
+            textAlign: TextAlign.center,
             style: TextStyle(
               color: error == null ? AppColors.muted : AppColors.accent,
             ),
           ),
-          Expanded(child: Center(child: _MarkButton(onMark: _onMark))),
-          Wrap(
-            spacing: 8,
-            children: [
-              for (final t in LiveSessionViewModel.tags)
-                ChoiceChip(
-                  label: Text(t),
-                  selected: _vm.selectedTag == t,
-                  showCheckmark: false,
-                  backgroundColor: AppColors.card,
-                  selectedColor: AppColors.ink,
-                  side: const BorderSide(color: AppColors.line),
-                  labelStyle: TextStyle(
-                    color: _vm.selectedTag == t ? Colors.white : AppColors.ink,
-                  ),
-                  onSelected: (_) => _vm.selectTag(t),
-                ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton(
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.ink,
-                side: const BorderSide(color: AppColors.line),
-                padding: const EdgeInsets.symmetric(vertical: 16),
-              ),
-              onPressed: _confirmEnd,
-              child: const Text('End session'),
+          Expanded(
+            child: Center(
+              child: live
+                  ? _RoundButton(
+                      label: 'Mark',
+                      color: AppColors.accent,
+                      onPressed: _onMark,
+                      fireOnTouchDown: true, // fires on touch, not on release
+                    )
+                  : _RoundButton(
+                      label: 'Start',
+                      color: AppColors.ink,
+                      onPressed: _onStart,
+                    ),
             ),
           ),
+          if (live) ...[
+            Wrap(
+              spacing: 8,
+              children: [
+                for (final t in LiveSessionViewModel.tags)
+                  ChoiceChip(
+                    label: Text(t),
+                    selected: _vm.selectedTag == t,
+                    showCheckmark: false,
+                    backgroundColor: AppColors.card,
+                    selectedColor: AppColors.ink,
+                    side: const BorderSide(color: AppColors.line),
+                    labelStyle: TextStyle(
+                      color: _vm.selectedTag == t
+                          ? Colors.white
+                          : AppColors.ink,
+                    ),
+                    onSelected: (_) => _vm.selectTag(t),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.ink,
+                  side: const BorderSide(color: AppColors.line),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                ),
+                onPressed: _confirmEnd,
+                child: const Text('End session'),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -191,10 +229,20 @@ class _ElapsedClockState extends State<_ElapsedClock> {
   }
 }
 
-class _MarkButton extends StatelessWidget {
-  const _MarkButton({required this.onMark});
+class _RoundButton extends StatelessWidget {
+  const _RoundButton({
+    required this.label,
+    required this.color,
+    required this.onPressed,
+    this.fireOnTouchDown = false,
+  });
 
-  final VoidCallback onMark;
+  final String label;
+  final Color color;
+  final VoidCallback onPressed;
+
+  /// Mark reacts the instant a finger lands. Start waits for a normal tap.
+  final bool fireOnTouchDown;
 
   @override
   Widget build(BuildContext context) {
@@ -202,16 +250,16 @@ class _MarkButton extends StatelessWidget {
       width: 240,
       height: 240,
       child: Material(
-        color: AppColors.accent,
+        color: color,
         shape: const CircleBorder(),
         child: InkWell(
           customBorder: const CircleBorder(),
-          onTapDown: (_) => onMark(), // fires on touch, not on release
-          onTap: () {},
-          child: const Center(
+          onTapDown: fireOnTouchDown ? (_) => onPressed() : null,
+          onTap: fireOnTouchDown ? () {} : onPressed,
+          child: Center(
             child: Text(
-              'Mark',
-              style: TextStyle(
+              label,
+              style: const TextStyle(
                 color: Colors.white,
                 fontSize: 36,
                 fontWeight: FontWeight.w700,
