@@ -1,3 +1,4 @@
+import '../../domain/models/folder.dart';
 import '../../domain/models/mark.dart';
 import '../../domain/models/session.dart';
 import '../services/app_database.dart';
@@ -17,13 +18,26 @@ class LocalSessionRepository implements SessionRepository {
   }
 
   @override
-  Future<Session> createSession(String title) async {
+  Stream<List<Folder>> watchFolders() {
+    return _db.watchFolderRows().map(
+      (rows) => rows.map(_toFolder).toList(growable: false),
+    );
+  }
+
+  @override
+  Future<Session> createSession(String title, {int? folderId}) async {
     final createdAt = DateTime.now();
     final id = await _db.insertSession(
       title: title,
       createdAtMs: createdAt.millisecondsSinceEpoch,
+      folderId: folderId,
     );
-    return Session(id: id, title: title, createdAt: createdAt);
+    return Session(
+      id: id,
+      title: title,
+      createdAt: createdAt,
+      folderId: folderId,
+    );
   }
 
   @override
@@ -81,6 +95,33 @@ class LocalSessionRepository implements SessionRepository {
     return rows.map(_toMark).toList(growable: false);
   }
 
+  @override
+  Future<Folder> createFolder(String name) async {
+    final createdAt = DateTime.now();
+    final id = await _db.insertFolder(
+      name: name,
+      createdAtMs: createdAt.millisecondsSinceEpoch,
+    );
+    return Folder(id: id, name: name, createdAt: createdAt);
+  }
+
+  @override
+  Future<void> renameFolder(int id, String name) =>
+      _db.setFolderName(id, name);
+
+  @override
+  Future<void> deleteFolder(int id) => _db.deleteFolderWithContents(id);
+
+  @override
+  Future<List<Session>> getSessionsInFolder(int folderId) async {
+    final rows = await _db.findSessionRowsInFolder(folderId);
+    return rows.map(_toSession).toList(growable: false);
+  }
+
+  @override
+  Future<void> moveSession(int sessionId, int? folderId) =>
+      _db.setSessionFolder(sessionId, folderId);
+
   // Database rows -> domain models. The rest of the app never sees rows.
 
   DateTime? _fromMs(int? ms) =>
@@ -95,6 +136,15 @@ class LocalSessionRepository implements SessionRepository {
       endedAt: _fromMs(r.endedAtMs),
       delaySeconds: r.delaySeconds,
       videoFile: r.videoFile,
+      folderId: r.folderId,
+    );
+  }
+
+  Folder _toFolder(FolderRow r) {
+    return Folder(
+      id: r.id,
+      name: r.name,
+      createdAt: DateTime.fromMillisecondsSinceEpoch(r.createdAtMs),
     );
   }
 

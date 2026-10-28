@@ -3,6 +3,16 @@ import 'package:drift_flutter/drift_flutter.dart';
 
 part 'app_database.g.dart';
 
+@DataClassName('FolderRow')
+class FoldersTable extends Table {
+  @override
+  String get tableName => 'folders';
+
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get name => text()();
+  IntColumn get createdAtMs => integer()();
+}
+
 @DataClassName('SessionRow')
 class SessionsTable extends Table {
   @override
@@ -19,6 +29,9 @@ class SessionsTable extends Table {
   IntColumn get endedAtMs => integer().nullable()();
   IntColumn get delaySeconds => integer().withDefault(const Constant(8))();
   TextColumn get videoFile => text().nullable()();
+
+  /// Optional folder membership. Null = "Unfiled".
+  IntColumn get folderId => integer().nullable().references(FoldersTable, #id)();
 }
 
 @DataClassName('MarkRow')
@@ -34,14 +47,14 @@ class MarksTable extends Table {
   TextColumn get tag => text().withDefault(const Constant('Highlight'))();
 }
 
-@DriftDatabase(tables: [SessionsTable, MarksTable])
+@DriftDatabase(tables: [FoldersTable, SessionsTable, MarksTable])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(driftDatabase(name: 'clipt'));
 
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -60,6 +73,11 @@ class AppDatabase extends _$AppDatabase {
       if (from < 3) {
         await m.addColumn(sessionsTable, sessionsTable.videoFile);
       }
+      // Add folders table and folderId column for version 4
+      if (from < 4) {
+        await m.createTable(foldersTable);
+        await m.addColumn(sessionsTable, sessionsTable.folderId);
+      }
     },
     beforeOpen: (details) async {
       // Enable foreign keys
@@ -73,9 +91,65 @@ class AppDatabase extends _$AppDatabase {
     )..orderBy([(t) => OrderingTerm.desc(t.createdAtMs)])).watch();
   }
 
-  Future<int> insertSession({required String title, required int createdAtMs}) {
+  Stream<List<FolderRow>> watchFolderRows() {
+    return (select(foldersTable)
+          ..orderBy([(t) => OrderingTerm.asc(t.name)]))
+        .watch();
+  }
+
+  Future<int> insertFolder({required String name, required int createdAtMs}) {
+    return into(foldersTable).insert(
+      FoldersTableCompanion.insert(name: name, createdAtMs: createdAtMs),
+    );
+  }
+
+  Future<void> setFolderName(int id, String name) {
+    return (update(foldersTable)..where((t) => t.id.equals(id))).write(
+      FoldersTableCompanion(name: Value(name)),
+    );
+  }
+
+  Future<List<SessionRow>> findSessionRowsInFolder(int folderId) {
+    return (select(sessionsTable)
+          ..where((t) => t.folderId.equals(folderId))
+          ..orderBy([(t) => OrderingTerm.desc(t.createdAtMs)]))
+        .get();
+  }
+
+  Future<void> setSessionFolder(int sessionId, int? folderId) {
+    return (update(sessionsTable)..where((t) => t.id.equals(sessionId))).write(
+      SessionsTableCompanion(folderId: Value(folderId)),
+    );
+  }
+
+  Future<void> deleteFolderWithContents(int folderId) {
+    return transaction(() async {
+      // Get all sessions in this folder
+      final sessions = await findSessionRowsInFolder(folderId);
+      // Delete marks for each session
+      for (final session in sessions) {
+        await (delete(marksTable)..where((t) => t.sessionId.equals(session.id)))
+            .go();
+      }
+      // Delete sessions
+      await (delete(sessionsTable)..where((t) => t.folderId.equals(folderId)))
+          .go();
+      // Delete folder
+      await (delete(foldersTable)..where((t) => t.id.equals(folderId))).go();
+    });
+  }
+
+  Future<int> insertSession({
+    required String title,
+    required int createdAtMs,
+    int? folderId,
+  }) {
     return into(sessionsTable).insert(
-      SessionsTableCompanion.insert(title: title, createdAtMs: createdAtMs),
+      SessionsTableCompanion.insert(
+        title: title,
+        createdAtMs: createdAtMs,
+        folderId: Value(folderId),
+      ),
     );
   }
 

@@ -1,3 +1,4 @@
+import '../../domain/models/folder.dart';
 import '../../domain/models/mark.dart';
 import '../../domain/models/session.dart';
 
@@ -7,8 +8,11 @@ abstract class SessionRepository {
   /// Emits the full list (newest first) now, and again after every change.
   Stream<List<Session>> watchSessions();
 
+  /// Emits the full list of folders (sorted by name, case-insensitive).
+  Stream<List<Folder>> watchFolders();
+
   /// Creates a session in the "ready" state. The timer does not run yet.
-  Future<Session> createSession(String title);
+  Future<Session> createSession(String title, {int? folderId});
 
   /// Starts the timer. Does nothing if the session already started.
   Future<void> startSession(int id);
@@ -36,4 +40,19 @@ abstract class SessionRepository {
   Future<void> deleteMark(int markId);
 
   Future<void> setVideo(int id, String? fileName);
+
+  /// Creates a new folder.
+  Future<Folder> createFolder(String name);
+
+  /// Renames an existing folder.
+  Future<void> renameFolder(int id, String name);
+
+  /// Deletes a folder, its sessions, and their marks.
+  Future<void> deleteFolder(int id);
+
+  /// Gets all sessions in a specific folder.
+  Future<List<Session>> getSessionsInFolder(int folderId);
+
+  /// Moves a session to a different folder (or unfiled with null).
+  Future<void> moveSession(int sessionId, int? folderId);
 }

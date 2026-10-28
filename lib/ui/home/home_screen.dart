@@ -1,11 +1,13 @@
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
-import '../../domain/models/session.dart';
+import '../../domain/models/folder.dart';
 import '../../routing/routes.dart';
-import '../../utils/formatters.dart';
 import '../core/themes/app_colors.dart';
 import '../core/themes/app_theme.dart';
+import '../core/widgets/confirm_dialog.dart';
+import '../core/widgets/name_dialog.dart';
+import '../core/widgets/session_tile.dart';
 import 'home_view_model.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -20,14 +22,19 @@ class HomeScreen extends StatelessWidget {
       builder: (context, _) {
         return Scaffold(
           appBar: AppBar(title: const Text('Clipt')),
-          body: _body(context),
+          body: Column(
+            children: [
+              _SearchBar(viewModel: viewModel),
+              Expanded(child: _body(context)),
+            ],
+          ),
           floatingActionButton: FloatingActionButton.extended(
             backgroundColor: AppColors.accent,
             foregroundColor: Colors.white,
             elevation: 0,
-            onPressed: () => _newSession(context),
+            onPressed: () => _newFolder(context),
             icon: const Icon(Icons.add),
-            label: const Text('New session'),
+            label: const Text('New folder'),
           ),
         );
       },
@@ -40,213 +47,275 @@ class HomeScreen extends StatelessWidget {
     }
     if (viewModel.hasFailed) {
       return const Center(
-        child: Text('Couldn\'t load your sessions. Restart the app.'),
+        child: Text('Couldn\'t load your data. Restart the app.'),
       );
     }
-    final sessions = viewModel.sessions;
-    if (sessions.isEmpty) return const _EmptyState();
 
-    return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
-      itemCount: sessions.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 10),
-      itemBuilder: (context, i) {
-        final session = sessions[i];
-        return _SessionTile(
-          session: session,
-          onOpen: () => context.push(
-            session.isEnded
-                ? Routes.reviewPath(session.id)
-                : Routes.sessionPath(session.id),
-          ),
-          onDelete: () => _confirmDelete(context, session),
-        );
-      },
-    );
+    if (viewModel.isSearching) {
+      return _SearchResults(viewModel: viewModel);
+    }
+
+    return _FolderList(viewModel: viewModel);
   }
 
-  Future<void> _newSession(BuildContext context) async {
-    final title = await showDialog<String>(
-      context: context,
-      builder: (_) => const _NewSessionDialog(),
+  Future<void> _newFolder(BuildContext context) async {
+    final name = await showNameDialog(
+      context,
+      title: 'New folder',
+      hint: 'Ranked matches',
+      confirmLabel: 'Create',
     );
-    if (title == null) return; // cancelled
-
-    await viewModel.createSession(title);
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Session created. Tap it when you\'re ready to start.'),
-      ),
-    );
-  }
-
-  Future<void> _confirmDelete(BuildContext context, Session session) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete session?'),
-        content: Text(
-          '"${session.title}" and all its marks will be deleted. '
-          'This can\'t be undone.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.accent),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-    if (ok == true) await viewModel.deleteSession(session);
+    if (name == null) return;
+    await viewModel.createFolder(name);
   }
 }
 
-enum _TileAction { delete }
+class _SearchBar extends StatelessWidget {
+  const _SearchBar({required this.viewModel});
 
-class _SessionTile extends StatelessWidget {
-  const _SessionTile({
-    required this.session,
-    required this.onOpen,
-    required this.onDelete,
-  });
-
-  final Session session;
-  final VoidCallback onOpen;
-  final Future<void> Function() onDelete;
-
-  String get _subtitle {
-    if (session.isReady) return 'Ready to start';
-    if (session.isLive) return 'In progress. Tap to resume.';
-    final started = session.startedAt!;
-    final length = session.length;
-    return '${formatDateTime(started)}  ·  '
-        '${formatClock(length?.inMilliseconds ?? 0)}';
-  }
-
-  Widget? get _leading {
-    if (session.isLive) {
-      return const Icon(Icons.circle, size: 12, color: AppColors.accent);
-    }
-    if (session.isReady) {
-      return const Icon(
-        Icons.circle_outlined,
-        size: 12,
-        color: AppColors.muted,
-      );
-    }
-    return null;
-  }
+  final HomeViewModel viewModel;
 
   @override
   Widget build(BuildContext context) {
-    return Dismissible(
-      key: ValueKey('session-${session.id}'),
-      direction: DismissDirection.endToStart,
-      confirmDismiss: (_) async {
-        await onDelete();
-        return false;
-      },
-      background: Container(
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 24),
-        decoration: BoxDecoration(
-          color: AppColors.accent,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: const Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.delete_outline, color: Colors.white),
-            SizedBox(width: 8),
-            Text(
-              'Delete',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
-      ),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
       child: Container(
         decoration: BoxDecoration(
           color: AppColors.card,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(color: AppColors.line),
         ),
-        child: Material(
-          color: Colors.transparent,
-          borderRadius: BorderRadius.circular(14),
-          child: ListTile(
-            leading: _leading,
-            title: Text(
-              session.title,
-              style: const TextStyle(fontWeight: FontWeight.w700),
-            ),
-            subtitle: Text(
-              _subtitle,
-              style: AppTheme.mono(size: 12, color: AppColors.muted),
-            ),
-            // The menu is a second way to delete, for people who don't swipe.
-            trailing: PopupMenuButton<_TileAction>(
-              icon: const Icon(Icons.more_vert, color: AppColors.muted),
-              onSelected: (_) => onDelete(),
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: _TileAction.delete, child: Text('Delete')),
-              ],
-            ),
-            onTap: onOpen,
+        child: TextField(
+          decoration: InputDecoration(
+            hintText: 'Search folders and sessions',
+            hintStyle: const TextStyle(color: AppColors.muted),
+            prefixIcon: const Icon(Icons.search, color: AppColors.muted),
+            suffixIcon: viewModel.query.isNotEmpty
+                ? IconButton(
+                    icon: const Icon(Icons.clear, color: AppColors.muted),
+                    onPressed: () => viewModel.setQuery(''),
+                  )
+                : null,
+            border: InputBorder.none,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           ),
+          onChanged: viewModel.setQuery,
         ),
       ),
     );
   }
 }
 
-/// Owns its own text controller, so it is disposed safely with the dialog.
-class _NewSessionDialog extends StatefulWidget {
-  const _NewSessionDialog();
+class _FolderList extends StatelessWidget {
+  const _FolderList({required this.viewModel});
 
-  @override
-  State<_NewSessionDialog> createState() => _NewSessionDialogState();
-}
-
-class _NewSessionDialogState extends State<_NewSessionDialog> {
-  final _controller = TextEditingController();
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
+  final HomeViewModel viewModel;
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('New session'),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        textInputAction: TextInputAction.done,
-        decoration: const InputDecoration(hintText: 'Valorant ranked'),
-        onSubmitted: (value) => Navigator.pop(context, value),
+    final folders = viewModel.folders;
+    final unfiledCount = viewModel.unfiledCount;
+
+    if (folders.isEmpty && unfiledCount == 0) {
+      return const _EmptyState();
+    }
+
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
+      itemCount: folders.length + (unfiledCount > 0 ? 1 : 0),
+      separatorBuilder: (_, _) => const SizedBox(height: 10),
+      itemBuilder: (context, i) {
+        if (i < folders.length) {
+          return _FolderTile(
+            folder: folders[i].folder,
+            onRename: () => _renameFolder(context, folders[i].folder),
+            onDelete: () => _confirmDeleteFolder(context, folders[i].folder),
+          );
+        } else {
+          return _UnfiledTile(count: unfiledCount);
+        }
+      },
+    );
+  }
+
+  Future<void> _renameFolder(BuildContext context, Folder folder) async {
+    final name = await showNameDialog(
+      context,
+      title: 'Rename folder',
+      hint: folder.name,
+      confirmLabel: 'Rename',
+      initialText: folder.name,
+    );
+    if (name == null) return;
+    await viewModel.renameFolder(folder, name);
+  }
+
+  Future<void> _confirmDeleteFolder(BuildContext context, Folder folder) async {
+    final count = await viewModel.getSessionCountInFolder(folder.id);
+    if (!context.mounted) return;
+    final ok = await confirmDelete(
+      context,
+      title: 'Delete folder?',
+      message: '"${folder.name}" and its $count session(s) '
+          '(with marks and videos) will be deleted. This can\'t be undone.',
+    );
+    if (ok) await viewModel.deleteFolder(folder);
+  }
+}
+
+class _FolderTile extends StatelessWidget {
+  const _FolderTile({
+    required this.folder,
+    required this.onRename,
+    required this.onDelete,
+  });
+
+  final Folder folder;
+  final VoidCallback onRename;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.line),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        child: ListTile(
+          leading: const Icon(Icons.folder, color: AppColors.muted),
+          title: Text(
+            folder.name,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+          trailing: PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert, color: AppColors.muted),
+            onSelected: (action) {
+              if (action == 'rename') {
+                onRename();
+              } else if (action == 'delete') {
+                onDelete();
+              }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'rename', child: Text('Rename')),
+              PopupMenuItem(value: 'delete', child: Text('Delete')),
+            ],
+          ),
+          onTap: () => context.push(Routes.folderPath(folder.id)),
         ),
-        FilledButton(
-          style: FilledButton.styleFrom(backgroundColor: AppColors.accent),
-          onPressed: () => Navigator.pop(context, _controller.text),
-          child: const Text('Create'),
+      ),
+    );
+  }
+}
+
+class _UnfiledTile extends StatelessWidget {
+  const _UnfiledTile({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.line),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        child: ListTile(
+          leading: const Icon(Icons.inbox, color: AppColors.muted),
+          title: const Text(
+            'Unfiled',
+            style: TextStyle(fontWeight: FontWeight.w700),
+          ),
+          subtitle: Text(
+            '$count session(s)',
+            style: AppTheme.mono(size: 12, color: AppColors.muted),
+          ),
+          onTap: () => context.push(Routes.unfiled),
         ),
+      ),
+    );
+  }
+}
+
+class _SearchResults extends StatelessWidget {
+  const _SearchResults({required this.viewModel});
+
+  final HomeViewModel viewModel;
+
+  @override
+  Widget build(BuildContext context) {
+    final results = viewModel.results;
+
+    if (results.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Text(
+            'Nothing matches "${viewModel.query}".',
+            style: const TextStyle(color: AppColors.muted),
+          ),
+        ),
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+      children: [
+        if (results.folders.isNotEmpty) ...[
+          const Text(
+            'Folders',
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18),
+          ),
+          const SizedBox(height: 8),
+          ...results.folders.map(
+            (fs) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _FolderTile(
+                folder: fs.folder,
+                onRename: () {},
+                onDelete: () {},
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
+        if (results.sessions.isNotEmpty) ...[
+          const Text(
+            'Sessions',
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18),
+          ),
+          const SizedBox(height: 8),
+          ...results.sessions.map(
+            (s) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: SessionTile(
+                session: s,
+                onOpen: () => context.push(Routes.openPath(
+                  id: s.id,
+                  ended: s.isEnded,
+                )),
+                onDelete: () async {
+                  final ok = await confirmDelete(
+                    context,
+                    title: 'Delete session?',
+                    message: '"${s.title}" and all its marks will be deleted. '
+                        'This can\'t be undone.',
+                  );
+                  if (ok) await viewModel.deleteSession(s);
+                },
+                folderLabel: viewModel.folderLabelFor(s),
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -264,15 +333,16 @@ class _EmptyState extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              'Create your first session',
-              style: Theme.of(context).textTheme.headlineSmall
+              'Create your first folder',
+              style: Theme.of(context)
+                  .textTheme
+                  .headlineSmall
                   ?.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 8),
             const Text(
-              'Create a session, then open it and press Start when you begin '
-              'recording. Tap while you play and Clipt turns your taps into '
-              'clips later.',
+              'Folders help you organize your recording sessions. '
+              'Create one to get started.',
               textAlign: TextAlign.center,
               style: TextStyle(color: AppColors.muted),
             ),

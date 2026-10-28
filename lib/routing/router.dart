@@ -5,6 +5,8 @@ import 'package:provider/provider.dart';
 import '../data/repositories/session_repository.dart';
 import '../data/repositories/video_repository.dart';
 import '../ui/core/widgets/view_model_host.dart';
+import '../ui/folder/folder_screen.dart';
+import '../ui/folder/folder_view_model.dart';
 import '../ui/home/home_screen.dart';
 import '../ui/home/home_view_model.dart';
 import '../ui/live_session/live_session_screen.dart';
@@ -25,6 +27,33 @@ GoRouter createRouter() {
             videoRepository: c.read<VideoRepository>(),
           ),
           builder: (c, viewModel) => HomeScreen(viewModel: viewModel),
+        ),
+      ),
+      GoRoute(
+        path: Routes.folder,
+        builder: (context, state) {
+          final id = int.tryParse(state.pathParameters['id'] ?? '') ?? -1;
+          return ViewModelHost<FolderViewModel>(
+            key: ValueKey('folder-$id'),
+            create: (c) => FolderViewModel(
+              sessionRepository: c.read<SessionRepository>(),
+              videoRepository: c.read<VideoRepository>(),
+              folderId: id,
+            ),
+            builder: (c, viewModel) => FolderScreen(viewModel: viewModel),
+          );
+        },
+      ),
+      GoRoute(
+        path: Routes.unfiled,
+        builder: (context, state) => ViewModelHost<FolderViewModel>(
+          key: const ValueKey('unfiled'),
+          create: (c) => FolderViewModel(
+            sessionRepository: c.read<SessionRepository>(),
+            videoRepository: c.read<VideoRepository>(),
+            folderId: null,
+          ),
+          builder: (c, viewModel) => FolderScreen(viewModel: viewModel),
         ),
       ),
       GoRoute(

@@ -12,6 +12,7 @@ class Session {
     this.endedAt,
     this.delaySeconds = 8,
     this.videoFile,
+    this.folderId,
   });
 
   final int id;
@@ -27,6 +28,9 @@ class Session {
 
   /// Name of the linked video inside app storage (not a full path).
   final String? videoFile;
+
+  /// Optional folder membership. Null = "Unfiled".
+  final int? folderId;
 
   SessionStatus get status {
     if (startedAt == null) return SessionStatus.ready;
