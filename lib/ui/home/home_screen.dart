@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -21,7 +22,18 @@ class HomeScreen extends StatelessWidget {
       listenable: viewModel,
       builder: (context, _) {
         return Scaffold(
-          appBar: AppBar(title: const Text('Clipt')),
+          appBar: AppBar(
+            title: const Text('Clipt'),
+            actions: kDebugMode
+                ? [
+                    IconButton(
+                      icon: const Icon(Icons.science_outlined),
+                      tooltip: 'FFmpeg lab',
+                      onPressed: () => context.push('/dev/ffmpeg'),
+                    ),
+                  ]
+                : null,
+          ),
           body: Column(
             children: [
               _SearchBar(viewModel: viewModel),
@@ -97,7 +109,10 @@ class _SearchBar extends StatelessWidget {
                   )
                 : null,
             border: InputBorder.none,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 12,
+            ),
           ),
           onChanged: viewModel.setQuery,
         ),
@@ -156,7 +171,8 @@ class _FolderList extends StatelessWidget {
     final ok = await confirmDelete(
       context,
       title: 'Delete folder?',
-      message: '"${folder.name}" and its $count session(s) '
+      message:
+          '"${folder.name}" and its $count session(s) '
           '(with marks and videos) will be deleted. This can\'t be undone.',
     );
     if (ok) await viewModel.deleteFolder(folder);
@@ -298,15 +314,14 @@ class _SearchResults extends StatelessWidget {
               padding: const EdgeInsets.only(bottom: 10),
               child: SessionTile(
                 session: s,
-                onOpen: () => context.push(Routes.openPath(
-                  id: s.id,
-                  ended: s.isEnded,
-                )),
+                onOpen: () =>
+                    context.push(Routes.openPath(id: s.id, ended: s.isEnded)),
                 onDelete: () async {
                   final ok = await confirmDelete(
                     context,
                     title: 'Delete session?',
-                    message: '"${s.title}" and all its marks will be deleted. '
+                    message:
+                        '"${s.title}" and all its marks will be deleted. '
                         'This can\'t be undone.',
                   );
                   if (ok) await viewModel.deleteSession(s);
@@ -334,9 +349,7 @@ class _EmptyState extends StatelessWidget {
           children: [
             Text(
               'Create your first folder',
-              style: Theme.of(context)
-                  .textTheme
-                  .headlineSmall
+              style: Theme.of(context).textTheme.headlineSmall
                   ?.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 8),

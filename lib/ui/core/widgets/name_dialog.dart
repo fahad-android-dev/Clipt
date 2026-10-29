@@ -75,8 +75,9 @@ class _NameDialogState extends State<_NameDialog> {
         ),
         ValueListenableBuilder<TextEditingValue>(
           valueListenable: _controller,
-          builder: (_, value, ___) {
-            final canConfirm = widget.allowEmpty || value.text.trim().isNotEmpty;
+          builder: (_, value, _) {
+            final canConfirm =
+                widget.allowEmpty || value.text.trim().isNotEmpty;
             return FilledButton(
               style: FilledButton.styleFrom(
                 backgroundColor: canConfirm ? AppColors.accent : AppColors.line,
