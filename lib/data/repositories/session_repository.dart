@@ -1,3 +1,4 @@
+import '../../domain/models/clip_edit.dart';
 import '../../domain/models/folder.dart';
 import '../../domain/models/mark.dart';
 import '../../domain/models/session.dart';
@@ -55,4 +56,13 @@ abstract class SessionRepository {
 
   /// Moves a session to a different folder (or unfiled with null).
   Future<void> moveSession(int sessionId, int? folderId);
+
+  /// Updates the sync offset for a session.
+  Future<void> updateSessionSync(int id, int offsetMs);
+
+  /// Gets all clip edits for a session.
+  Future<List<ClipEdit>> getClipEdits(int sessionId);
+
+  /// Saves a clip edit (inserts or updates).
+  Future<void> saveClipEdit(ClipEdit edit);
 }

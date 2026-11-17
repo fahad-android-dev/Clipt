@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 
 import '../data/repositories/session_repository.dart';
 import '../data/repositories/video_repository.dart';
+import '../data/repositories/export_repository.dart';
+import '../data/repositories/entitlement_repository.dart';
 import '../dev/ffmpeg_lab_screen.dart';
 import '../ui/core/widgets/view_model_host.dart';
 import '../ui/folder/folder_screen.dart';
@@ -14,6 +16,10 @@ import '../ui/live_session/live_session_screen.dart';
 import '../ui/live_session/live_session_view_model.dart';
 import '../ui/review/review_screen.dart';
 import '../ui/review/review_view_model.dart';
+import '../ui/clips/clips_screen.dart';
+import '../ui/clips/clips_view_model.dart';
+import '../ui/export/export_screen.dart';
+import '../ui/export/export_view_model.dart';
 import 'routes.dart';
 
 GoRouter createRouter() {
@@ -81,6 +87,38 @@ GoRouter createRouter() {
             sessionId: id,
           )..load(),
           builder: (c, viewModel) => ReviewScreen(viewModel: viewModel),
+        );
+      },
+    ),
+    GoRoute(
+      path: Routes.clips,
+      builder: (context, state) {
+        final id = int.tryParse(state.pathParameters['id'] ?? '') ?? -1;
+        return ViewModelHost<ClipsViewModel>(
+          key: ValueKey('clips-$id'),
+          create: (c) => ClipsViewModel(
+            sessionRepository: c.read<SessionRepository>(),
+            videoRepository: c.read<VideoRepository>(),
+            sessionId: id,
+          ),
+          builder: (c, viewModel) => ClipsScreen(viewModel: viewModel),
+        );
+      },
+    ),
+    GoRoute(
+      path: Routes.export,
+      builder: (context, state) {
+        final id = int.tryParse(state.pathParameters['id'] ?? '') ?? -1;
+        return ViewModelHost<ExportViewModel>(
+          key: ValueKey('export-$id'),
+          create: (c) => ExportViewModel(
+            sessionRepository: c.read<SessionRepository>(),
+            videoRepository: c.read<VideoRepository>(),
+            exportRepository: c.read<ExportRepository>(),
+            entitlementRepository: c.read<EntitlementRepository>(),
+            sessionId: id,
+          )..load(),
+          builder: (c, viewModel) => ExportScreen(viewModel: viewModel),
         );
       },
     ),

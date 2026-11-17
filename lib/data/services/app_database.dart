@@ -32,6 +32,9 @@ class SessionsTable extends Table {
 
   /// Optional folder membership. Null = "Unfiled".
   IntColumn get folderId => integer().nullable().references(FoldersTable, #id)();
+
+  /// Sync offset in milliseconds. Positive means video starts before mark time.
+  IntColumn get syncOffsetMs => integer().withDefault(const Constant(0))();
 }
 
 @DataClassName('MarkRow')
@@ -47,14 +50,29 @@ class MarksTable extends Table {
   TextColumn get tag => text().withDefault(const Constant('Highlight'))();
 }
 
-@DriftDatabase(tables: [FoldersTable, SessionsTable, MarksTable])
+@DataClassName('ClipEditRow')
+class ClipEditsTable extends Table {
+  @override
+  String get tableName => 'clip_edits';
+
+  IntColumn get markId => integer().references(MarksTable, #id)();
+  IntColumn get sessionId => integer().references(SessionsTable, #id)();
+  IntColumn get startMs => integer().nullable()();
+  IntColumn get endMs => integer().nullable()();
+  BoolColumn get included => boolean().withDefault(const Constant(true))();
+
+  @override
+  Set<Column> get primaryKey => {markId};
+}
+
+@DriftDatabase(tables: [FoldersTable, SessionsTable, MarksTable, ClipEditsTable])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(driftDatabase(name: 'clipt'));
 
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -77,6 +95,14 @@ class AppDatabase extends _$AppDatabase {
       if (from < 4) {
         await m.createTable(foldersTable);
         await m.addColumn(sessionsTable, sessionsTable.folderId);
+      }
+      // Add syncOffsetMs column for version 5
+      if (from < 5) {
+        await m.addColumn(sessionsTable, sessionsTable.syncOffsetMs);
+      }
+      // Add clip_edits table for version 6
+      if (from < 6) {
+        await m.createTable(clipEditsTable);
       }
     },
     beforeOpen: (details) async {
@@ -126,8 +152,11 @@ class AppDatabase extends _$AppDatabase {
     return transaction(() async {
       // Get all sessions in this folder
       final sessions = await findSessionRowsInFolder(folderId);
-      // Delete marks for each session
+      // Delete clip edits and marks for each session
       for (final session in sessions) {
+        await (delete(clipEditsTable)
+                ..where((t) => t.sessionId.equals(session.id)))
+            .go();
         await (delete(marksTable)..where((t) => t.sessionId.equals(session.id)))
             .go();
       }
@@ -174,6 +203,7 @@ class AppDatabase extends _$AppDatabase {
   /// Deletes a session and all of its marks together, or neither.
   Future<void> deleteSessionWithMarks(int id) {
     return transaction(() async {
+      await (delete(clipEditsTable)..where((t) => t.sessionId.equals(id))).go();
       await (delete(marksTable)..where((t) => t.sessionId.equals(id))).go();
       await (delete(sessionsTable)..where((t) => t.id.equals(id))).go();
     });
@@ -212,6 +242,12 @@ class AppDatabase extends _$AppDatabase {
     );
   }
 
+  Future<void> setSessionSync(int id, int offsetMs) {
+    return (update(sessionsTable)..where((t) => t.id.equals(id))).write(
+      SessionsTableCompanion(syncOffsetMs: Value(offsetMs)),
+    );
+  }
+
   Future<void> setMarkTag(int markId, String tag) {
     return (update(marksTable)..where((t) => t.id.equals(markId))).write(
       MarksTableCompanion(tag: Value(tag)),
@@ -219,6 +255,33 @@ class AppDatabase extends _$AppDatabase {
   }
 
   Future<void> deleteMarkRow(int markId) {
-    return (delete(marksTable)..where((t) => t.id.equals(markId))).go();
+    return transaction(() async {
+      await (delete(clipEditsTable)..where((t) => t.markId.equals(markId))).go();
+      await (delete(marksTable)..where((t) => t.id.equals(markId))).go();
+    });
+  }
+
+  Future<List<ClipEditRow>> findClipEditRows(int sessionId) {
+    return (select(clipEditsTable)
+          ..where((t) => t.sessionId.equals(sessionId)))
+        .get();
+  }
+
+  Future<void> upsertClipEdit({
+    required int markId,
+    required int sessionId,
+    int? startMs,
+    int? endMs,
+    required bool included,
+  }) {
+    return into(clipEditsTable).insertOnConflictUpdate(
+      ClipEditsTableCompanion(
+        markId: Value(markId),
+        sessionId: Value(sessionId),
+        startMs: Value(startMs),
+        endMs: Value(endMs),
+        included: Value(included),
+      ),
+    );
   }
 }

@@ -1,7 +1,9 @@
 import 'package:material_ui/material_ui.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../domain/models/mark.dart';
 import '../../domain/models/mark_tags.dart';
+import '../../routing/routes.dart';
 import '../../utils/formatters.dart';
 import '../core/themes/app_colors.dart';
 import '../core/themes/app_theme.dart';
@@ -84,12 +86,24 @@ class _ReviewScreenState extends State<ReviewScreen> {
             onRemove: _confirmRemoveVideo,
           ),
         ),
+        const SizedBox(height: 12),
         Expanded(
           child: ListView(
             padding: const EdgeInsets.fromLTRB(20, 12, 20, 40),
             children: [
               _SummaryCard(length: _vm.length, markCount: marks.length),
               const SizedBox(height: 12),
+              if (_vm.hasVideo && marks.isNotEmpty) ...[
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(backgroundColor: AppColors.accent),
+                  onPressed: () => context.push(Routes.clipsPath(_vm.sessionId)),
+                  icon: const Icon(Icons.edit_outlined),
+                  label: const Text('Edit clips'),
+                ),
+                const SizedBox(height: 12),
+              ],
+              if (_vm.hasVideo) _SyncCard(viewModel: _vm),
+              if (_vm.hasVideo) const SizedBox(height: 12),
               _DelayCard(viewModel: _vm),
               if (error != null) ...[
                 const SizedBox(height: 12),
@@ -116,6 +130,34 @@ class _ReviewScreenState extends State<ReviewScreen> {
                           ? () => _preview.currentState?.seekTo(
                                 Duration(milliseconds: _vm.clipStartMs(m)),
                               )
+                          : null,
+                      onMatch: _vm.hasVideo
+                          ? () async {
+                              final position =
+                                  _preview.currentState?.position;
+                              if (position == null ||
+                                  position == Duration.zero) {
+                                final ctx = context;
+                                if (ctx.mounted) {
+                                  ScaffoldMessenger.of(ctx).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Play the video first.'),
+                                    ),
+                                  );
+                                }
+                                return;
+                              }
+                              await _preview.currentState?.pause();
+                              await _vm.matchMark(m, position);
+                              final ctx = context;
+                              if (ctx.mounted) {
+                                ScaffoldMessenger.of(ctx).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Synced to this moment.'),
+                                  ),
+                                );
+                              }
+                            }
                           : null,
                     ),
                   ),
@@ -312,6 +354,76 @@ class _DelayCard extends StatelessWidget {
   }
 }
 
+class _SyncCard extends StatelessWidget {
+  const _SyncCard({required this.viewModel});
+
+  final ReviewViewModel viewModel;
+
+  @override
+  Widget build(BuildContext context) {
+    return _Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Video sync',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+              Text(
+                formatSignedSeconds(viewModel.syncOffsetMs),
+                style: AppTheme.mono(size: 16, weight: FontWeight.w700),
+              ),
+            ],
+          ),
+          Slider(
+            value: (viewModel.syncOffsetMs / 1000).clamp(-60, 60).toDouble(),
+            min: -60,
+            max: 60,
+            divisions: 240,
+            label: formatSignedSeconds(viewModel.syncOffsetMs),
+            activeColor: AppColors.accent,
+            onChanged: (v) => viewModel.previewSync((v * 1000).round()),
+            onChangeEnd: (_) => viewModel.saveSync(),
+          ),
+          Row(
+            children: [
+              OutlinedButton(
+                onPressed: () => viewModel.nudgeSync(-500),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(60, 32),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                ),
+                child: const Text('-0.5 s'),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton(
+                onPressed: () => viewModel.nudgeSync(500),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(60, 32),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                ),
+                child: const Text('+0.5 s'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Marks are timed from when you pressed Start in Clipt. If you '
+            'began recording before that, the shift is positive. Tip: play a '
+            'mark, pause the video on the exact moment it happened, then tap '
+            'Match video here on that mark.',
+            style: TextStyle(color: AppColors.muted, fontSize: 13),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _MarkTile extends StatelessWidget {
   const _MarkTile({
     required this.mark,
@@ -319,6 +431,7 @@ class _MarkTile extends StatelessWidget {
     required this.onTagChanged,
     required this.onDelete,
     required this.onPreview,
+    required this.onMatch,
   });
 
   final Mark mark;
@@ -328,6 +441,9 @@ class _MarkTile extends StatelessWidget {
 
   /// Null when the session has no video yet.
   final VoidCallback? onPreview;
+
+  /// Null when the session has no video yet.
+  final VoidCallback? onMatch;
 
   @override
   Widget build(BuildContext context) {
@@ -359,6 +475,21 @@ class _MarkTile extends StatelessWidget {
                   'Clip starts at ${formatClock(clipStartMs)}',
                   style: AppTheme.mono(size: 12, color: AppColors.muted),
                 ),
+                if (onMatch != null) ...[
+                  const SizedBox(height: 4),
+                  TextButton(
+                    onPressed: onMatch,
+                    style: TextButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: const Text(
+                      'Match video here',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),

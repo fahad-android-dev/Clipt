@@ -16,6 +16,7 @@ class ReviewViewModel extends ChangeNotifier {
         _videos = videoRepository;
 
   static const maxDelay = 20;
+  static const maxSyncMs = 60000;
 
   final SessionRepository _repository;
   final VideoRepository _videos;
@@ -35,6 +36,12 @@ class ReviewViewModel extends ChangeNotifier {
   /// What is saved in the database.
   int _savedDelay = 8;
 
+  /// What the sync slider shows right now (may be mid-drag).
+  int _syncOffsetMs = 0;
+
+  /// What is saved in the database.
+  int _savedSync = 0;
+
   bool get isLoading => _loading;
   bool get notFound => _notFound;
   bool get isImporting => _importing;
@@ -44,12 +51,13 @@ class ReviewViewModel extends ChangeNotifier {
   File? get video => _video;
   bool get hasVideo => _video != null;
   int get delaySeconds => _delaySeconds;
+  int get syncOffsetMs => _syncOffsetMs;
   String? get errorMessage => _error;
 
-  /// Where a clip for this mark starts: the tap time minus the reaction
-  /// delay, never before the start of the recording.
+  /// Where a clip for this mark starts: the tap time plus sync offset minus
+  /// the reaction delay, never before the start of the recording.
   int clipStartMs(Mark mark) {
-    final start = mark.atMs - _delaySeconds * 1000;
+    final start = mark.atMs + _syncOffsetMs - _delaySeconds * 1000;
     return start < 0 ? 0 : start;
   }
 
@@ -62,6 +70,8 @@ class ReviewViewModel extends ChangeNotifier {
         _session = session;
         _delaySeconds = session.delaySeconds;
         _savedDelay = session.delaySeconds;
+        _syncOffsetMs = session.syncOffsetMs.clamp(-maxSyncMs, maxSyncMs);
+        _savedSync = _syncOffsetMs;
         _marks = await _repository.getMarks(sessionId);
         final name = session.videoFile;
         if (name != null) {
@@ -135,6 +145,39 @@ class ReviewViewModel extends ChangeNotifier {
       _error = 'Couldn\'t save the delay. Try again.';
     }
     notifyListeners();
+  }
+
+  /// Called while the sync slider moves. Updates the screen only.
+  void previewSync(int ms) {
+    _syncOffsetMs = ms.clamp(-maxSyncMs, maxSyncMs);
+    notifyListeners();
+  }
+
+  /// Called when the finger lifts. Saves to the database.
+  Future<void> saveSync() async {
+    if (_syncOffsetMs == _savedSync) return;
+    try {
+      await _repository.updateSessionSync(sessionId, _syncOffsetMs);
+      _savedSync = _syncOffsetMs;
+      _error = null;
+    } catch (_) {
+      _syncOffsetMs = _savedSync;
+      _error = 'Couldn\'t save the sync. Try again.';
+    }
+    notifyListeners();
+  }
+
+  /// Nudges the sync by a small amount and saves immediately.
+  Future<void> nudgeSync(int deltaMs) async {
+    previewSync(_syncOffsetMs + deltaMs);
+    await saveSync();
+  }
+
+  /// Sets the sync offset so that the current video position matches the mark.
+  Future<void> matchMark(Mark mark, Duration videoPosition) async {
+    final offset = videoPosition.inMilliseconds - mark.atMs;
+    previewSync(offset);
+    await saveSync();
   }
 
   Future<void> changeTag(int markId, String tag) async {

@@ -49,6 +49,7 @@ dependencies:
   material_ui: ^1.8.0
   drift_flutter: ^0.3.1
   ffmpeg_kit_flutter_new_min: ^3.6.7
+  gal: ^2.3.3
 
 dev_dependencies:
   flutter_test:

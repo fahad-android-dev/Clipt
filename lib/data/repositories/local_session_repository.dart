@@ -1,3 +1,4 @@
+import '../../domain/models/clip_edit.dart';
 import '../../domain/models/folder.dart';
 import '../../domain/models/mark.dart';
 import '../../domain/models/session.dart';
@@ -122,6 +123,26 @@ class LocalSessionRepository implements SessionRepository {
   Future<void> moveSession(int sessionId, int? folderId) =>
       _db.setSessionFolder(sessionId, folderId);
 
+  @override
+  Future<void> updateSessionSync(int id, int offsetMs) =>
+      _db.setSessionSync(id, offsetMs);
+
+  @override
+  Future<List<ClipEdit>> getClipEdits(int sessionId) async {
+    final rows = await _db.findClipEditRows(sessionId);
+    return rows.map(_toClipEdit).toList(growable: false);
+  }
+
+  @override
+  Future<void> saveClipEdit(ClipEdit edit) =>
+      _db.upsertClipEdit(
+        markId: edit.markId,
+        sessionId: edit.sessionId,
+        startMs: edit.startMs,
+        endMs: edit.endMs,
+        included: edit.included,
+      );
+
   // Database rows -> domain models. The rest of the app never sees rows.
 
   DateTime? _fromMs(int? ms) =>
@@ -137,6 +158,7 @@ class LocalSessionRepository implements SessionRepository {
       delaySeconds: r.delaySeconds,
       videoFile: r.videoFile,
       folderId: r.folderId,
+      syncOffsetMs: r.syncOffsetMs,
     );
   }
 
@@ -150,5 +172,15 @@ class LocalSessionRepository implements SessionRepository {
 
   Mark _toMark(MarkRow r) {
     return Mark(id: r.id, sessionId: r.sessionId, atMs: r.atMs, tag: r.tag);
+  }
+
+  ClipEdit _toClipEdit(ClipEditRow r) {
+    return ClipEdit(
+      markId: r.markId,
+      sessionId: r.sessionId,
+      startMs: r.startMs,
+      endMs: r.endMs,
+      included: r.included,
+    );
   }
 }

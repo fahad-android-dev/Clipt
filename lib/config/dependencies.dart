@@ -3,8 +3,11 @@ import 'package:provider/single_child_widget.dart';
 
 import '../data/repositories/local_session_repository.dart';
 import '../data/repositories/local_video_repository.dart';
+import '../data/repositories/local_export_repository.dart';
+import '../data/repositories/entitlement_repository.dart';
 import '../data/repositories/session_repository.dart';
 import '../data/repositories/video_repository.dart';
+import '../data/repositories/export_repository.dart';
 import '../data/services/app_database.dart';
 import '../data/services/video_storage_service.dart';
 
@@ -26,5 +29,15 @@ List<SingleChildWidget> get dependencies => [
         create: (context) => LocalVideoRepository(
           storage: context.read<VideoStorageService>(),
         ),
+      ),
+      // Export repositories
+      Provider<ExportRepository>(
+        create: (_) => LocalExportRepository(),
+      ),
+      Provider<StubEntitlementRepository>(
+        create: (_) => StubEntitlementRepository(),
+      ),
+      Provider<EntitlementRepository>(
+        create: (context) => context.read<StubEntitlementRepository>(),
       ),
     ];

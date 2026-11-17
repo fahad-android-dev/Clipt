@@ -11,3 +11,9 @@ String formatClock(int ms) {
 
 String formatDateTime(DateTime d) =>
     '${d.day}/${d.month}/${d.year}  ${_two(d.hour)}:${_two(d.minute)}';
+
+String formatSignedSeconds(int ms) {
+  final seconds = ms / 1000;
+  final sign = seconds >= 0 ? '+' : '';
+  return '$sign${seconds.toStringAsFixed(1)} s';
+}

@@ -13,6 +13,7 @@ class Session {
     this.delaySeconds = 8,
     this.videoFile,
     this.folderId,
+    this.syncOffsetMs = 0,
   });
 
   final int id;
@@ -31,6 +32,9 @@ class Session {
 
   /// Optional folder membership. Null = "Unfiled".
   final int? folderId;
+
+  /// Sync offset in milliseconds. Positive means video starts before mark time.
+  final int syncOffsetMs;
 
   SessionStatus get status {
     if (startedAt == null) return SessionStatus.ready;

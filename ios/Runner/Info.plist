@@ -67,6 +67,8 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>NSPhotoLibraryUsageDescription</key>
-<string>Clipt needs access to your videos so you can cut clips from your recordings.</string>
+	<string>Clipt needs access to your videos so you can cut clips from your recordings.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Clipt saves your exported clips to your photo library.</string>
 </dict>
 </plist>
