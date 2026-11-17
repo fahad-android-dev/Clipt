@@ -1,13 +1,16 @@
-import 'dart:io';
-
 import 'package:material_ui/material_ui.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../domain/clip_planner.dart';
 import '../../routing/routes.dart';
 import '../../utils/formatters.dart';
 import '../core/themes/app_colors.dart';
+import '../core/themes/app_spacing.dart';
 import '../core/themes/app_theme.dart';
+import '../core/widgets/app_card.dart';
+import '../core/widgets/bottom_action_bar.dart';
+import '../core/widgets/empty_state.dart';
 import '../core/widgets/tag_pill.dart';
 import '../core/widgets/video_preview.dart';
 import 'clips_view_model.dart';
@@ -23,6 +26,7 @@ class ClipsScreen extends StatefulWidget {
 
 class _ClipsScreenState extends State<ClipsScreen> {
   final _preview = GlobalKey<VideoPreviewState>();
+  final _stripController = ScrollController();
 
   ClipsViewModel get _vm => widget.viewModel;
 
@@ -30,6 +34,169 @@ class _ClipsScreenState extends State<ClipsScreen> {
   void initState() {
     super.initState();
     _vm.load();
+  }
+
+  @override
+  void dispose() {
+    _stripController.dispose();
+    super.dispose();
+  }
+
+  void _selectAndPlay(int markId) {
+    _vm.select(markId);
+    HapticFeedback.selectionClick();
+    final clips = _vm.clips;
+    if (clips.isEmpty) return;
+    final clip = clips.firstWhere(
+      (c) => c.mark.id == markId,
+      orElse: () => clips.first,
+    );
+    _preview.currentState?.playRange(
+      Duration(milliseconds: clip.startMs),
+      Duration(milliseconds: clip.endMs),
+    );
+    _scrollStripToSelected();
+  }
+
+  void _scrollStripToSelected() {
+    final clips = _vm.clips;
+    final idx = clips.indexWhere((c) => c.mark.id == _vm.selectedMarkId);
+    if (idx < 0 || !_stripController.hasClients) return;
+    const chipW = 104.0 + 8.0;
+    final target = (idx * chipW) -
+        (_stripController.position.viewportDimension / 2 - chipW / 2);
+    _stripController.animateTo(
+      target.clamp(0, _stripController.position.maxScrollExtent),
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+    );
+  }
+
+  AppBar _buildAppBar() {
+    return AppBar(
+      leading: const BackButton(),
+      title: const Text('Edit clips'),
+    );
+  }
+
+  Widget _buildBottomBar() {
+    final included = _vm.includedCount;
+    final total = _vm.totalClips;
+    final lengthMs = _vm.includedLengthMs;
+    final summary =
+        '$included of $total clip${total == 1 ? '' : 's'} · ${formatClock(lengthMs)}';
+
+    return BottomActionBar(
+      summaryText: summary,
+      buttonLabel: 'Export',
+      onPressed: included > 0
+          ? () => context.push(Routes.exportPath(_vm.sessionId))
+          : null,
+      disabledHint: 'Include at least one clip to export.',
+    );
+  }
+
+  Widget _buildVideoArea() {
+    final maxH = MediaQuery.sizeOf(context).height * 0.35;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.sm,
+        AppSpacing.lg,
+        0,
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        child: Container(
+          constraints: BoxConstraints(maxHeight: maxH),
+          color: Colors.black,
+          child: _buildVideoWithOverlay(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVideoWithOverlay() {
+    return Stack(
+      children: [
+        GestureDetector(
+          onTap: () => _preview.currentState?.togglePlayPause(),
+          child: VideoPreview(
+            key: _preview,
+            file: _vm.video!,
+            onReady: _vm.setVideoDuration,
+          ),
+        ),
+        // Position chip: bottom-left
+        Positioned(
+          bottom: AppSpacing.sm,
+          left: AppSpacing.sm,
+          child: _PositionChip(previewKey: _preview, vm: _vm),
+        ),
+        // Large play icon fades when playing
+        _PlayIconOverlay(previewKey: _preview),
+      ],
+    );
+  }
+
+  Widget _buildSelectedClipPanel() {
+    final clips = _vm.clips;
+    final markId = _vm.selectedMarkId;
+    if (markId == null || clips.isEmpty) return const SizedBox.shrink();
+
+    final idx = clips.indexWhere((c) => c.mark.id == markId);
+    final clip = idx >= 0 ? clips[idx] : clips.first;
+    final realIdx = idx >= 0 ? idx : 0;
+
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 180),
+      child: _ClipDetailPanel(
+        key: ValueKey(clip.mark.id),
+        clip: clip,
+        index: realIdx,
+        total: clips.length,
+        previewKey: _preview,
+        vm: _vm,
+      ),
+    );
+  }
+
+  Widget _buildErrorBanner() {
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        width: double.infinity,
+        margin: const EdgeInsets.fromLTRB(
+            AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.sm),
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.base, vertical: AppSpacing.sm),
+        decoration: BoxDecoration(
+          color: AppColors.tagFail.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(AppRadius.sm),
+          border:
+              Border.all(color: AppColors.tagFail.withValues(alpha: 0.4)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.error_outline_rounded,
+                size: 18, color: AppColors.tagFail),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Text(
+                _vm.errorMessage!,
+                style: const TextStyle(
+                    fontSize: 13, color: AppColors.tagFail),
+              ),
+            ),
+            GestureDetector(
+              onTap: _vm.dismissError,
+              child: const Icon(Icons.close,
+                  size: 18, color: AppColors.tagFail),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -44,269 +211,582 @@ class _ClipsScreenState extends State<ClipsScreen> {
         }
         if (_vm.notFound) {
           return Scaffold(
-            appBar: AppBar(title: const Text('Edit clips')),
-            body: const Center(child: Text('This session no longer exists.')),
+            appBar: _buildAppBar(),
+            body: EmptyState(
+              icon: Icons.search_off_rounded,
+              title: 'Session not found',
+              message: 'This session no longer exists.',
+              actionLabel: 'Go back',
+              onAction: () => context.pop(),
+            ),
           );
         }
         if (_vm.video == null) {
           return Scaffold(
-            appBar: AppBar(title: const Text('Edit clips')),
-            body: const Center(
-              child: Text('No video linked to this session.'),
+            appBar: _buildAppBar(),
+            body: EmptyState(
+              icon: Icons.videocam_off_rounded,
+              title: 'Add your recording first',
+              message: 'Link a video to this session before editing clips.',
+              actionLabel: 'Back to review',
+              onAction: () =>
+                  context.push(Routes.reviewPath(_vm.sessionId)),
             ),
           );
         }
+        if (_vm.clips.isEmpty) {
+          return Scaffold(
+            appBar: _buildAppBar(),
+            body: EmptyState(
+              icon: Icons.content_cut_rounded,
+              title: 'No clips yet',
+              message:
+                  'Tap a moment during a session to create a clip mark.',
+              actionLabel: 'Go back',
+              onAction: () => context.pop(),
+            ),
+          );
+        }
+
         return Scaffold(
-          appBar: AppBar(title: const Text('Edit clips')),
-          body: _content(),
+          appBar: _buildAppBar(),
+          body: Column(
+            children: [
+              _buildVideoArea(),
+              const SizedBox(height: AppSpacing.sm),
+              _ClipStrip(
+                clips: _vm.clips,
+                selectedMarkId: _vm.selectedMarkId,
+                scrollController: _stripController,
+                onSelect: _selectAndPlay,
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              Expanded(child: _buildSelectedClipPanel()),
+              if (_vm.errorMessage != null) _buildErrorBanner(),
+              _buildBottomBar(),
+            ],
+          ),
         );
       },
     );
   }
-
-  Widget _content() {
-    final clips = _vm.clips;
-    final error = _vm.errorMessage;
-
-    return Column(
-      children: [
-        // Fixed top section
-        Container(
-          color: AppColors.paper,
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
-                child: _VideoCard(
-                  file: _vm.video!,
-                  previewKey: _preview,
-                  onReady: _vm.setVideoDuration,
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
-                child: _SummaryRow(viewModel: _vm),
-              ),
-              if (error != null)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-                  child: Text(error, style: const TextStyle(color: AppColors.accent)),
-                ),
-            ],
-          ),
-        ),
-        // Scrollable clip list
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 40),
-            children: [
-              if (clips.isEmpty)
-                const _EmptyClips()
-              else
-                for (final clip in clips)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: _ClipCard(
-                      clip: clip,
-                      previewKey: _preview,
-                      onTrimChanged: (start, end) =>
-                          _vm.previewTrim(clip.mark.id, start, end),
-                      onTrimSaved: () => _vm.saveTrim(clip.mark.id),
-                      onPreview: () => _preview.currentState?.playRange(
-                            Duration(milliseconds: clip.startMs),
-                            Duration(milliseconds: clip.endMs),
-                          ),
-                      onIncludedChanged: (included) =>
-                          _vm.setIncluded(clip.mark.id, included),
-                      onReset: () => _vm.resetClip(clip.mark.id),
-                    ),
-                  ),
-            ],
-          ),
-        ),
-        if (_vm.includedCount > 0)
-          Padding(
-            padding: const EdgeInsets.all(20),
-            child: FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: AppColors.accent),
-              onPressed: () => context.push(Routes.exportPath(_vm.sessionId)),
-              child: Text('Export ${_vm.includedCount} clip${_vm.includedCount == 1 ? "" : "s"}'),
-            ),
-          ),
-      ],
-    );
-  }
 }
 
-class _Card extends StatelessWidget {
-  const _Card({required this.child});
+// ─────────────────────────────────────────────────────────────────────────────
+// Position chip (shows clip-relative time)
+// ─────────────────────────────────────────────────────────────────────────────
 
-  final Widget child;
+class _PositionChip extends StatelessWidget {
+  const _PositionChip({required this.previewKey, required this.vm});
+
+  final GlobalKey<VideoPreviewState> previewKey;
+  final ClipsViewModel vm;
 
   @override
   Widget build(BuildContext context) {
+    final state = previewKey.currentState;
+    final markId = vm.selectedMarkId;
+    if (state == null || markId == null) return const SizedBox.shrink();
+
+    final clips = vm.clips;
+    final idx = clips.indexWhere((c) => c.mark.id == markId);
+    if (idx < 0) return const SizedBox.shrink();
+
+    final clip = clips[idx];
+    final pos = state.position;
+    final clipPos = pos - Duration(milliseconds: clip.startMs);
+    final clipLen = Duration(milliseconds: clip.lengthMs);
+    final posStr =
+        _fmtMinSec(clipPos.isNegative ? Duration.zero : clipPos);
+    final lenStr = _fmtMinSec(clipLen);
+
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: AppColors.card,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.line),
+        color: Colors.black54,
+        borderRadius: BorderRadius.circular(8),
       ),
-      child: child,
+      child: Text(
+        '$posStr / $lenStr',
+        style: AppTheme.mono(size: 12, color: Colors.white),
+      ),
+    );
+  }
+
+  String _fmtMinSec(Duration d) {
+    final m = d.inMinutes.remainder(60);
+    final s = d.inSeconds.remainder(60);
+    return '$m:${s.toString().padLeft(2, '0')}';
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Large play icon overlay — fades out when playing
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _PlayIconOverlay extends StatelessWidget {
+  const _PlayIconOverlay({required this.previewKey});
+
+  final GlobalKey<VideoPreviewState> previewKey;
+
+  @override
+  Widget build(BuildContext context) {
+    final playing = previewKey.currentState?.isPlaying ?? false;
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 160),
+          opacity: playing ? 0.0 : 0.65,
+          child: const Center(
+            child: Icon(Icons.play_circle_fill_rounded,
+                size: 56, color: Colors.white),
+          ),
+        ),
+      ),
     );
   }
 }
 
-class _VideoCard extends StatelessWidget {
-  const _VideoCard({
-    required this.file,
-    required this.previewKey,
-    required this.onReady,
+// ─────────────────────────────────────────────────────────────────────────────
+// Clip strip
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ClipStrip extends StatelessWidget {
+  const _ClipStrip({
+    required this.clips,
+    required this.selectedMarkId,
+    required this.scrollController,
+    required this.onSelect,
   });
 
-  final File file;
-  final GlobalKey<VideoPreviewState> previewKey;
-  final void Function(Duration) onReady;
+  final List<PlannedClip> clips;
+  final int? selectedMarkId;
+  final ScrollController scrollController;
+  final void Function(int markId) onSelect;
 
   @override
   Widget build(BuildContext context) {
-    return _Card(
-      child: VideoPreview(
-        key: previewKey,
-        file: file,
-        onReady: onReady,
+    return SizedBox(
+      height: 84,
+      child: ListView.separated(
+        controller: scrollController,
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+        separatorBuilder: (context, idx) => const SizedBox(width: 8),
+        itemCount: clips.length,
+        itemBuilder: (_, i) {
+          final clip = clips[i];
+          final selected = clip.mark.id == selectedMarkId;
+          return _ClipChip(
+            clip: clip,
+            index: i,
+            selected: selected,
+            onTap: () => onSelect(clip.mark.id),
+          );
+        },
       ),
     );
   }
 }
 
-class _SummaryRow extends StatelessWidget {
-  const _SummaryRow({required this.viewModel});
-
-  final ClipsViewModel viewModel;
-
-  @override
-  Widget build(BuildContext context) {
-    final included = viewModel.includedCount;
-    final total = viewModel.totalClips;
-    final length = formatClock(viewModel.includedLengthMs);
-
-    return Text(
-      '$included of $total clips · $length total',
-      style: const TextStyle(color: AppColors.muted, fontSize: 14),
-    );
-  }
-}
-
-class _ClipCard extends StatelessWidget {
-  const _ClipCard({
+class _ClipChip extends StatelessWidget {
+  const _ClipChip({
     required this.clip,
-    required this.previewKey,
-    required this.onTrimChanged,
-    required this.onTrimSaved,
-    required this.onPreview,
-    required this.onIncludedChanged,
-    required this.onReset,
+    required this.index,
+    required this.selected,
+    required this.onTap,
   });
 
   final PlannedClip clip;
-  final GlobalKey<VideoPreviewState> previewKey;
-  final void Function(int startMs, int endMs) onTrimChanged;
-  final VoidCallback onTrimSaved;
-  final VoidCallback onPreview;
-  final ValueChanged<bool> onIncludedChanged;
-  final VoidCallback onReset;
+  final int index;
+  final bool selected;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final dimmed = !clip.included;
+    final tagColor = AppColors.forTag(clip.mark.tag);
+    return AnimatedOpacity(
+      duration: const Duration(milliseconds: 160),
+      opacity: clip.included ? 1.0 : 0.45,
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          width: 104,
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: selected ? AppColors.surfaceTint : AppColors.card,
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            border: Border.all(
+              color: selected ? AppColors.accent : AppColors.line,
+              width: selected ? 1.5 : 1.0,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Text(
+                    (index + 1).toString().padLeft(2, '0'),
+                    style: AppTheme.mono(
+                      size: 13,
+                      weight: FontWeight.w700,
+                      color: selected ? AppColors.accent : AppColors.ink,
+                    ),
+                  ),
+                  if (!clip.included) ...[
+                    const SizedBox(width: 4),
+                    const Icon(Icons.visibility_off_rounded,
+                        size: 12, color: AppColors.muted),
+                  ],
+                ],
+              ),
+              Row(
+                children: [
+                  Container(
+                    width: 7,
+                    height: 7,
+                    decoration: BoxDecoration(
+                      color: tagColor,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      clip.mark.tag,
+                      style: const TextStyle(
+                          fontSize: 11, color: AppColors.muted),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              Text(
+                '${(clip.lengthMs / 1000).toStringAsFixed(0)} s',
+                style: AppTheme.mono(size: 11, color: AppColors.muted),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
 
-    return Opacity(
-      opacity: dimmed ? 0.5 : 1.0,
-      child: _Card(
+// ─────────────────────────────────────────────────────────────────────────────
+// Selected clip detail panel
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ClipDetailPanel extends StatelessWidget {
+  const _ClipDetailPanel({
+    super.key,
+    required this.clip,
+    required this.index,
+    required this.total,
+    required this.previewKey,
+    required this.vm,
+  });
+
+  final PlannedClip clip;
+  final int index;
+  final int total;
+  final GlobalKey<VideoPreviewState> previewKey;
+  final ClipsViewModel vm;
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        0,
+        AppSpacing.lg,
+        AppSpacing.sm,
+      ),
+      child: AppCard(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                TagPill(tag: clip.mark.tag),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    '${formatClock(clip.startMs)} – ${formatClock(clip.endMs)}',
-                    style: AppTheme.mono(size: 13, color: AppColors.muted),
-                  ),
-                ),
-                Text(
-                  '${(clip.lengthMs / 1000).toStringAsFixed(1)} s',
-                  style: AppTheme.mono(size: 13, weight: FontWeight.w700),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            RangeSlider(
-              values: RangeValues(
-                clip.startMs.toDouble(),
-                clip.endMs.toDouble(),
-              ),
-              min: clip.windowStartMs.toDouble(),
-              max: clip.windowEndMs.toDouble(),
-              divisions: 200,
-              labels: RangeLabels(
-                formatClock(clip.startMs),
-                formatClock(clip.endMs),
-              ),
-              activeColor: AppColors.accent,
-              onChanged: (values) => onTrimChanged(
-                values.start.round(),
-                values.end.round(),
-              ),
-              onChangeEnd: (_) => onTrimSaved(),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                IconButton(
-                  tooltip: 'Preview this clip',
-                  icon: const Icon(
-                    Icons.play_circle_outline,
-                    color: AppColors.accent,
-                  ),
-                  onPressed: onPreview,
-                ),
-                const SizedBox(width: 8),
-                const Text('Include'),
-                const SizedBox(width: 4),
-                Switch(
-                  value: clip.included,
-                  onChanged: onIncludedChanged,
-                  activeTrackColor: AppColors.accent,
-                ),
-                const Spacer(),
-                if (clip.isCustom)
-                  TextButton(
-                    onPressed: onReset,
-                    child: const Text('Reset'),
-                  ),
-              ],
-            ),
+            _buildHeaderRow(),
+            const SizedBox(height: AppSpacing.base),
+            _buildTrimControl(context),
+            const SizedBox(height: AppSpacing.base),
+            _buildFineTuneSection(),
+            const SizedBox(height: AppSpacing.base),
+            _buildActionsRow(),
           ],
         ),
       ),
     );
   }
+
+  Widget _buildHeaderRow() {
+    return Row(
+      children: [
+        TagPill(tag: clip.mark.tag),
+        const SizedBox(width: AppSpacing.sm),
+        Expanded(
+          child: Text(
+            'Clip ${index + 1} of $total',
+            style: const TextStyle(
+              fontSize: 13,
+              color: AppColors.muted,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Include',
+              style: TextStyle(fontSize: 13, color: AppColors.muted),
+            ),
+            const SizedBox(width: 4),
+            Switch(
+              value: clip.included,
+              activeTrackColor: AppColors.accent,
+              onChanged: (v) {
+                HapticFeedback.lightImpact();
+                vm.setIncluded(clip.mark.id, v);
+              },
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTrimControl(BuildContext context) {
+    final startSec = clip.startMs / 1000;
+    final endSec = clip.endMs / 1000;
+    final lengthSec = clip.lengthMs / 1000;
+    final windowStart = clip.windowStartMs.toDouble();
+    final windowEnd = clip.windowEndMs.toDouble();
+
+    return SliderTheme(
+      data: SliderTheme.of(context).copyWith(
+        trackHeight: 10,
+        activeTrackColor: AppColors.accent,
+        inactiveTrackColor: AppColors.line,
+        thumbColor: AppColors.accent,
+        rangeThumbShape: const RoundRangeSliderThumbShape(
+          enabledThumbRadius: 14,
+        ),
+        rangeTrackShape: const RoundedRectRangeSliderTrackShape(),
+        rangeValueIndicatorShape:
+            const PaddleRangeSliderValueIndicatorShape(),
+        // ignore: deprecated_member_use
+        showValueIndicator: ShowValueIndicator.always,
+        valueIndicatorColor: AppColors.ink,
+        valueIndicatorTextStyle: AppTheme.mono(
+          size: 12,
+          color: Colors.white,
+        ),
+        overlayColor: AppColors.accent.withValues(alpha: 0.15),
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                _fmtSec(startSec),
+                style: AppTheme.mono(size: 20, weight: FontWeight.w600),
+              ),
+              Text(
+                '${lengthSec.toStringAsFixed(1)} s',
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: AppColors.muted,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              Text(
+                _fmtSec(endSec),
+                style: AppTheme.mono(size: 20, weight: FontWeight.w600),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          RangeSlider(
+            values: RangeValues(
+              clip.startMs.toDouble(),
+              clip.endMs.toDouble(),
+            ),
+            min: windowStart,
+            max: windowEnd,
+            labels: RangeLabels(
+              formatClock(clip.startMs),
+              formatClock(clip.endMs),
+            ),
+            onChanged: (values) => vm.previewTrim(
+              clip.mark.id,
+              values.start.round(),
+              values.end.round(),
+            ),
+            onChangeEnd: (_) => vm.saveTrim(clip.mark.id),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFineTuneSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _SectionLabel('Fine tune'),
+        const SizedBox(height: AppSpacing.sm),
+        _NudgeRow(
+          label: 'Start',
+          onMinus: () {
+            HapticFeedback.lightImpact();
+            vm.nudgeStart(clip.mark.id, -500);
+          },
+          onPlus: () {
+            HapticFeedback.lightImpact();
+            vm.nudgeStart(clip.mark.id, 500);
+          },
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        _NudgeRow(
+          label: 'End',
+          onMinus: () {
+            HapticFeedback.lightImpact();
+            vm.nudgeEnd(clip.mark.id, -500);
+          },
+          onPlus: () {
+            HapticFeedback.lightImpact();
+            vm.nudgeEnd(clip.mark.id, 500);
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActionsRow() {
+    return Row(
+      children: [
+        Expanded(
+          child: FilledButton.tonal(
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(0, 48),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            onPressed: () {
+              previewKey.currentState?.playRange(
+                Duration(milliseconds: clip.startMs),
+                Duration(milliseconds: clip.endMs),
+              );
+            },
+            child: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.play_arrow_rounded, size: 18),
+                SizedBox(width: 6),
+                Text('Play clip'),
+              ],
+            ),
+          ),
+        ),
+        if (clip.isCustom) ...[
+          const SizedBox(width: AppSpacing.sm),
+          TextButton(
+            style: TextButton.styleFrom(
+              minimumSize: const Size(0, 48),
+              foregroundColor: AppColors.muted,
+            ),
+            onPressed: () => vm.resetClip(clip.mark.id),
+            child: const Text('Reset'),
+          ),
+        ],
+      ],
+    );
+  }
+
+  String _fmtSec(double sec) {
+    final m = sec ~/ 60;
+    final s = sec % 60;
+    return '$m:${s.toStringAsFixed(1).padLeft(4, '0')}';
+  }
 }
 
-class _EmptyClips extends StatelessWidget {
-  const _EmptyClips();
+// ─────────────────────────────────────────────────────────────────────────────
+// Fine-tune nudge row
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _NudgeRow extends StatelessWidget {
+  const _NudgeRow({
+    required this.label,
+    required this.onMinus,
+    required this.onPlus,
+  });
+
+  final String label;
+  final VoidCallback onMinus;
+  final VoidCallback onPlus;
 
   @override
   Widget build(BuildContext context) {
-    return const _Card(
-      child: Text(
-        'No marks in this session.',
-        style: TextStyle(color: AppColors.muted),
+    final btnStyle = OutlinedButton.styleFrom(
+      minimumSize: const Size(0, 48),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.base),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+      ),
+      foregroundColor: AppColors.ink,
+      side: const BorderSide(color: AppColors.line),
+    );
+
+    return Row(
+      children: [
+        SizedBox(
+          width: 44,
+          child: Text(
+            label,
+            style: const TextStyle(fontSize: 13, color: AppColors.muted),
+          ),
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        OutlinedButton(
+          style: btnStyle,
+          onPressed: onMinus,
+          child: const Text('−0.5 s'),
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        OutlinedButton(
+          style: btnStyle,
+          onPressed: onPlus,
+          child: const Text('+0.5 s'),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Small all-caps section label
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel(this.title);
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      title.toUpperCase(),
+      style: const TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 0.8,
+        color: AppColors.muted,
       ),
     );
   }

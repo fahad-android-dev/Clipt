@@ -6,7 +6,10 @@ import '../../domain/models/mark_tags.dart';
 import '../../routing/routes.dart';
 import '../../utils/formatters.dart';
 import '../core/themes/app_colors.dart';
+import '../core/themes/app_spacing.dart';
 import '../core/themes/app_theme.dart';
+import '../core/widgets/app_card.dart';
+import '../core/widgets/tag_pill.dart';
 import '../core/widgets/video_preview.dart';
 import 'review_view_model.dart';
 
@@ -61,183 +64,272 @@ class _ReviewScreenState extends State<ReviewScreen> {
         if (_vm.notFound) {
           return Scaffold(
             appBar: AppBar(),
-            body: const Center(child: Text('This session no longer exists.')),
+            body: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.search_off_rounded,
+                      size: 48, color: AppColors.muted),
+                  const SizedBox(height: AppSpacing.base),
+                  const Text(
+                    'Session not found',
+                    style: TextStyle(
+                        fontSize: 17, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  const Text('This session no longer exists.',
+                      style: TextStyle(color: AppColors.muted)),
+                  const SizedBox(height: AppSpacing.xl),
+                  TextButton(
+                    onPressed: () => context.pop(),
+                    child: const Text('Go back'),
+                  ),
+                ],
+              ),
+            ),
           );
         }
         return Scaffold(
           appBar: AppBar(title: Text(_vm.title)),
-          body: _content(),
+          body: _buildContent(),
         );
       },
     );
   }
 
-  Widget _content() {
+  Widget _buildContent() {
     final marks = _vm.marks;
     final error = _vm.errorMessage;
 
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
-          child: _VideoCard(
-            viewModel: _vm,
+    return SafeArea(
+      top: false,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg,
+          AppSpacing.sm,
+          AppSpacing.lg,
+          AppSpacing.xxl,
+        ),
+        children: [
+          // ── Stat chips ───────────────────────────────────────────────
+          Row(
+            children: [
+              _StatChip(
+                label: 'Played',
+                value: _vm.length == null
+                    ? '--:--'
+                    : formatClock(_vm.length!.inMilliseconds),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              _StatChip(
+                label: 'Marks',
+                value: '${marks.length}',
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.base),
+          // ── Video card ───────────────────────────────────────────────
+          _VideoSection(
+            vm: _vm,
             previewKey: _preview,
             onRemove: _confirmRemoveVideo,
           ),
-        ),
-        const SizedBox(height: 12),
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 40),
-            children: [
-              _SummaryCard(length: _vm.length, markCount: marks.length),
-              const SizedBox(height: 12),
-              if (_vm.hasVideo && marks.isNotEmpty) ...[
-                FilledButton.icon(
-                  style: FilledButton.styleFrom(backgroundColor: AppColors.accent),
-                  onPressed: () => context.push(Routes.clipsPath(_vm.sessionId)),
-                  icon: const Icon(Icons.edit_outlined),
-                  label: const Text('Edit clips'),
+          const SizedBox(height: AppSpacing.sm),
+          // ── Edit clips CTA ───────────────────────────────────────────
+          if (_vm.hasVideo && marks.isNotEmpty) ...[
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.accent,
+                foregroundColor: Colors.white,
+                minimumSize: const Size.fromHeight(48),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
                 ),
-                const SizedBox(height: 12),
-              ],
-              if (_vm.hasVideo) _SyncCard(viewModel: _vm),
-              if (_vm.hasVideo) const SizedBox(height: 12),
-              _DelayCard(viewModel: _vm),
-              if (error != null) ...[
-                const SizedBox(height: 12),
-                Text(error, style: const TextStyle(color: AppColors.accent)),
-              ],
-              const SizedBox(height: 24),
-              const Text(
-                'Marks',
-                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18),
               ),
-              const SizedBox(height: 8),
-              if (marks.isEmpty)
-                const _EmptyMarks()
-              else
-                for (final m in marks)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: _MarkTile(
-                      mark: m,
-                      clipStartMs: _vm.clipStartMs(m),
-                      onTagChanged: (tag) => _vm.changeTag(m.id, tag),
-                      onDelete: () => _vm.deleteMark(m.id),
-                      onPreview: _vm.hasVideo
-                          ? () => _preview.currentState?.seekTo(
-                                Duration(milliseconds: _vm.clipStartMs(m)),
-                              )
-                          : null,
-                      onMatch: _vm.hasVideo
-                          ? () async {
-                              final position =
-                                  _preview.currentState?.position;
-                              if (position == null ||
-                                  position == Duration.zero) {
-                                final ctx = context;
-                                if (ctx.mounted) {
-                                  ScaffoldMessenger.of(ctx).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('Play the video first.'),
-                                    ),
-                                  );
-                                }
-                                return;
-                              }
-                              await _preview.currentState?.pause();
-                              await _vm.matchMark(m, position);
-                              final ctx = context;
-                              if (ctx.mounted) {
-                                ScaffoldMessenger.of(ctx).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Synced to this moment.'),
-                                  ),
-                                );
-                              }
-                            }
-                          : null,
-                    ),
-                  ),
-            ],
+              onPressed: () =>
+                  context.push(Routes.clipsPath(_vm.sessionId)),
+              icon: const Icon(Icons.edit_outlined),
+              label: const Text('Edit clips'),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              '${marks.length} mark${marks.length == 1 ? '' : 's'} found',
+              style: const TextStyle(fontSize: 12, color: AppColors.muted),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+          ],
+          // ── Error banner ─────────────────────────────────────────────
+          if (error != null) ...[
+            _ErrorBanner(message: error),
+            const SizedBox(height: AppSpacing.sm),
+          ],
+          // ── Timing collapsible ────────────────────────────────────────
+          _TimingCard(vm: _vm),
+          const SizedBox(height: AppSpacing.xl),
+          // ── Marks section ─────────────────────────────────────────────
+          const Text(
+            'MARKS',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.8,
+              color: AppColors.muted,
+            ),
           ),
-        ),
-      ],
+          const SizedBox(height: AppSpacing.sm),
+          if (marks.isEmpty)
+            const _EmptyMarks()
+          else
+            for (final m in marks)
+              Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                child: _MarkTile(
+                  mark: m,
+                  clipStartMs: _vm.clipStartMs(m),
+                  hasVideo: _vm.hasVideo,
+                  onTagChanged: (tag) => _vm.changeTag(m.id, tag),
+                  onDelete: () => _vm.deleteMark(m.id),
+                  onPreview: _vm.hasVideo
+                      ? () => _preview.currentState?.seekTo(
+                            Duration(milliseconds: _vm.clipStartMs(m)),
+                          )
+                      : null,
+                  onMatch: _vm.hasVideo
+                      ? () async {
+                          final position =
+                              _preview.currentState?.position;
+                          if (position == null ||
+                              position == Duration.zero) {
+                            final ctx = context;
+                            if (ctx.mounted) {
+                              ScaffoldMessenger.of(ctx).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Play the video first.'),
+                                ),
+                              );
+                            }
+                            return;
+                          }
+                          await _preview.currentState?.pause();
+                          await _vm.matchMark(m, position);
+                          final ctx = context;
+                          if (ctx.mounted) {
+                            ScaffoldMessenger.of(ctx).showSnackBar(
+                              const SnackBar(
+                                content: Text('Synced to this moment.'),
+                              ),
+                            );
+                          }
+                        }
+                      : null,
+                ),
+              ),
+        ],
+      ),
     );
   }
 }
 
-class _Card extends StatelessWidget {
-  const _Card({required this.child});
+// ─────────────────────────────────────────────────────────────────────────────
+// Stat chip (small pill with label + value)
+// ─────────────────────────────────────────────────────────────────────────────
 
-  final Widget child;
+class _StatChip extends StatelessWidget {
+  const _StatChip({required this.label, required this.value});
+
+  final String label;
+  final String value;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md, vertical: AppSpacing.xs),
       decoration: BoxDecoration(
         color: AppColors.card,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppRadius.sm),
         border: Border.all(color: AppColors.line),
       ),
-      child: child,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(label,
+              style: const TextStyle(
+                  fontSize: 12, color: AppColors.muted)),
+          const SizedBox(width: AppSpacing.sm),
+          Text(
+            value,
+            style: AppTheme.mono(
+                size: 14, weight: FontWeight.w700),
+          ),
+        ],
+      ),
     );
   }
 }
 
-class _VideoCard extends StatelessWidget {
-  const _VideoCard({
-    required this.viewModel,
+// ─────────────────────────────────────────────────────────────────────────────
+// Video section
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _VideoSection extends StatelessWidget {
+  const _VideoSection({
+    required this.vm,
     required this.previewKey,
     required this.onRemove,
   });
 
-  final ReviewViewModel viewModel;
+  final ReviewViewModel vm;
   final GlobalKey<VideoPreviewState> previewKey;
   final VoidCallback onRemove;
 
   @override
   Widget build(BuildContext context) {
-    if (viewModel.isImporting) {
-      return const _Card(
+    if (vm.isImporting) {
+      return AppCard(
         child: Row(
-          children: [
+          children: const [
             SizedBox(
               width: 20,
               height: 20,
               child: CircularProgressIndicator(strokeWidth: 2),
             ),
-            SizedBox(width: 12),
-            Expanded(child: Text('Adding your video. Long videos take a moment.')),
+            SizedBox(width: AppSpacing.md),
+            Expanded(
+                child: Text('Adding your video…')),
           ],
         ),
       );
     }
 
-    final file = viewModel.video;
+    final file = vm.video;
     if (file == null) {
-      return _Card(
+      return AppCard(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
               'Add your recording',
-              style: TextStyle(fontWeight: FontWeight.w700),
+              style: TextStyle(
+                  fontSize: 16, fontWeight: FontWeight.w700),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: AppSpacing.xs),
             const Text(
-              'Pick the video you recorded during this session. Clipt uses '
-              'your marks to find the clips.',
-              style: TextStyle(color: AppColors.muted, fontSize: 13),
+              'Pick the video you recorded during this session. '
+              'Clipt uses your marks to find the clips.',
+              style: TextStyle(fontSize: 13, color: AppColors.muted),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: AppSpacing.md),
             FilledButton.icon(
-              style: FilledButton.styleFrom(backgroundColor: AppColors.accent),
-              onPressed: viewModel.addVideo,
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.accent,
+                foregroundColor: Colors.white,
+                minimumSize: const Size.fromHeight(48),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              onPressed: vm.addVideo,
               icon: const Icon(Icons.video_library_outlined),
               label: const Text('Add video'),
             ),
@@ -246,20 +338,218 @@ class _VideoCard extends StatelessWidget {
       );
     }
 
-    return _Card(
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppRadius.lg),
+      child: AppCard(
+        padding: const EdgeInsets.all(0),
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(AppSpacing.sm),
+              child: VideoPreview(key: previewKey, file: file),
+            ),
+            const Divider(height: 1, color: AppColors.line),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: vm.addVideo,
+                  child: const Text('Replace'),
+                ),
+                TextButton(
+                  onPressed: onRemove,
+                  style:
+                      TextButton.styleFrom(foregroundColor: AppColors.muted),
+                  child: const Text('Remove'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Collapsible timing card
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _TimingCard extends StatefulWidget {
+  const _TimingCard({required this.vm});
+
+  final ReviewViewModel vm;
+
+  @override
+  State<_TimingCard> createState() => _TimingCardState();
+}
+
+class _TimingCardState extends State<_TimingCard>
+    with SingleTickerProviderStateMixin {
+  bool _expanded = false;
+  late final AnimationController _controller;
+  late final Animation<double> _sizeFactor;
+
+  ReviewViewModel get _vm => widget.vm;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 200),
+    );
+    _sizeFactor = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeInOut,
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _toggle() {
+    setState(() => _expanded = !_expanded);
+    if (_expanded) {
+      _controller.forward();
+    } else {
+      _controller.reverse();
+    }
+  }
+
+  String _summary() {
+    final sync = formatSignedSeconds(_vm.syncOffsetMs);
+    final delay = '${_vm.delaySeconds} s';
+    return 'Sync $sync · Lead-in $delay';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      padding: EdgeInsets.zero,
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          VideoPreview(key: previewKey, file: file),
-          const SizedBox(height: 4),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              TextButton(
-                onPressed: viewModel.addVideo,
-                child: const Text('Replace'),
+          // Header row (always visible)
+          InkWell(
+            borderRadius: BorderRadius.circular(AppRadius.lg),
+            onTap: _toggle,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.base,
+                vertical: AppSpacing.md,
               ),
-              TextButton(onPressed: onRemove, child: const Text('Remove')),
-            ],
+              child: Row(
+                children: [
+                  const Text(
+                    'Timing',
+                    style: TextStyle(
+                        fontSize: 15, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: Text(
+                      _summary(),
+                      style: const TextStyle(
+                          fontSize: 13, color: AppColors.muted),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  AnimatedRotation(
+                    turns: _expanded ? 0.5 : 0,
+                    duration: const Duration(milliseconds: 200),
+                    child: const Icon(Icons.expand_more_rounded,
+                        size: 20, color: AppColors.muted),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          // Expandable body
+          SizeTransition(
+            sizeFactor: _sizeFactor,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Divider(height: 1, color: AppColors.line),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.base,
+                    AppSpacing.md,
+                    AppSpacing.base,
+                    AppSpacing.md,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // ── Sync slider ─────────────────────────────────
+                      if (_vm.hasVideo) ...[
+                        _SliderRow(
+                          label: 'Video sync',
+                          value: formatSignedSeconds(_vm.syncOffsetMs),
+                        ),
+                        Slider(
+                          value: (_vm.syncOffsetMs / 1000)
+                              .clamp(-60, 60)
+                              .toDouble(),
+                          min: -60,
+                          max: 60,
+                          divisions: 240,
+                          label: formatSignedSeconds(_vm.syncOffsetMs),
+                          activeColor: AppColors.accent,
+                          onChanged: (v) =>
+                              _vm.previewSync((v * 1000).round()),
+                          onChangeEnd: (_) => _vm.saveSync(),
+                        ),
+                        Row(
+                          children: [
+                            _NudgeButton(
+                              label: '−0.5 s',
+                              onPressed: () => _vm.nudgeSync(-500),
+                            ),
+                            const SizedBox(width: AppSpacing.sm),
+                            _NudgeButton(
+                              label: '+0.5 s',
+                              onPressed: () => _vm.nudgeSync(500),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: AppSpacing.xs),
+                        const Text(
+                          'Offset between when you pressed Start and when recording began.',
+                          style: TextStyle(
+                              fontSize: 12, color: AppColors.muted),
+                        ),
+                        const SizedBox(height: AppSpacing.base),
+                      ],
+                      // ── Delay slider ────────────────────────────────
+                      _SliderRow(
+                        label: 'Lead-in',
+                        value: '${_vm.delaySeconds} s',
+                      ),
+                      Slider(
+                        value: _vm.delaySeconds.toDouble(),
+                        min: 0,
+                        max: ReviewViewModel.maxDelay.toDouble(),
+                        divisions: ReviewViewModel.maxDelay,
+                        label: '${_vm.delaySeconds}s',
+                        activeColor: AppColors.accent,
+                        onChanged: (v) => _vm.previewDelay(v.round()),
+                        onChangeEnd: (_) => _vm.saveDelay(),
+                      ),
+                      const Text(
+                        'Clips start this many seconds before each tap.',
+                        style: TextStyle(
+                            fontSize: 12, color: AppColors.muted),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -267,167 +557,60 @@ class _VideoCard extends StatelessWidget {
   }
 }
 
-class _SummaryCard extends StatelessWidget {
-  const _SummaryCard({required this.length, required this.markCount});
-
-  final Duration? length;
-  final int markCount;
-
-  @override
-  Widget build(BuildContext context) {
-    final played =
-        length == null ? '--:--' : formatClock(length!.inMilliseconds);
-
-    return _Card(
-      child: Row(
-        children: [
-          Expanded(child: _Stat(label: 'Played', value: played)),
-          Expanded(child: _Stat(label: 'Marks', value: '$markCount')),
-        ],
-      ),
-    );
-  }
-}
-
-class _Stat extends StatelessWidget {
-  const _Stat({required this.label, required this.value});
+class _SliderRow extends StatelessWidget {
+  const _SliderRow({required this.label, required this.value});
 
   final String label;
   final String value;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
       children: [
-        Text(label, style: const TextStyle(color: AppColors.muted)),
-        const SizedBox(height: 4),
-        Text(value, style: AppTheme.mono(size: 24, weight: FontWeight.w700)),
+        Expanded(
+          child: Text(label,
+              style: const TextStyle(
+                  fontSize: 14, fontWeight: FontWeight.w600)),
+        ),
+        Text(value,
+            style: AppTheme.mono(size: 14, weight: FontWeight.w700)),
       ],
     );
   }
 }
 
-class _DelayCard extends StatelessWidget {
-  const _DelayCard({required this.viewModel});
+class _NudgeButton extends StatelessWidget {
+  const _NudgeButton({required this.label, required this.onPressed});
 
-  final ReviewViewModel viewModel;
+  final String label;
+  final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
-    return _Card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Expanded(
-                child: Text(
-                  'Reaction delay',
-                  style: TextStyle(fontWeight: FontWeight.w700),
-                ),
-              ),
-              Text(
-                '${viewModel.delaySeconds}s',
-                style: AppTheme.mono(size: 16, weight: FontWeight.w700),
-              ),
-            ],
-          ),
-          Slider(
-            value: viewModel.delaySeconds.toDouble(),
-            min: 0,
-            max: ReviewViewModel.maxDelay.toDouble(),
-            divisions: ReviewViewModel.maxDelay,
-            label: '${viewModel.delaySeconds}s',
-            activeColor: AppColors.accent,
-            onChanged: (v) => viewModel.previewDelay(v.round()),
-            onChangeEnd: (_) => viewModel.saveDelay(),
-          ),
-          const Text(
-            'Clips start this many seconds before each tap, because you '
-            'always tap a moment after it happens.',
-            style: TextStyle(color: AppColors.muted, fontSize: 13),
-          ),
-        ],
+    return OutlinedButton(
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size(60, 36),
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10)),
+        foregroundColor: AppColors.ink,
+        side: const BorderSide(color: AppColors.line),
       ),
+      onPressed: onPressed,
+      child: Text(label, style: const TextStyle(fontSize: 13)),
     );
   }
 }
 
-class _SyncCard extends StatelessWidget {
-  const _SyncCard({required this.viewModel});
-
-  final ReviewViewModel viewModel;
-
-  @override
-  Widget build(BuildContext context) {
-    return _Card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Expanded(
-                child: Text(
-                  'Video sync',
-                  style: TextStyle(fontWeight: FontWeight.w700),
-                ),
-              ),
-              Text(
-                formatSignedSeconds(viewModel.syncOffsetMs),
-                style: AppTheme.mono(size: 16, weight: FontWeight.w700),
-              ),
-            ],
-          ),
-          Slider(
-            value: (viewModel.syncOffsetMs / 1000).clamp(-60, 60).toDouble(),
-            min: -60,
-            max: 60,
-            divisions: 240,
-            label: formatSignedSeconds(viewModel.syncOffsetMs),
-            activeColor: AppColors.accent,
-            onChanged: (v) => viewModel.previewSync((v * 1000).round()),
-            onChangeEnd: (_) => viewModel.saveSync(),
-          ),
-          Row(
-            children: [
-              OutlinedButton(
-                onPressed: () => viewModel.nudgeSync(-500),
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size(60, 32),
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                ),
-                child: const Text('-0.5 s'),
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton(
-                onPressed: () => viewModel.nudgeSync(500),
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size(60, 32),
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                ),
-                child: const Text('+0.5 s'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Marks are timed from when you pressed Start in Clipt. If you '
-            'began recording before that, the shift is positive. Tip: play a '
-            'mark, pause the video on the exact moment it happened, then tap '
-            'Match video here on that mark.',
-            style: TextStyle(color: AppColors.muted, fontSize: 13),
-          ),
-        ],
-      ),
-    );
-  }
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Mark tile
+// ─────────────────────────────────────────────────────────────────────────────
 
 class _MarkTile extends StatelessWidget {
   const _MarkTile({
     required this.mark,
     required this.clipStartMs,
+    required this.hasVideo,
     required this.onTagChanged,
     required this.onDelete,
     required this.onPreview,
@@ -436,120 +619,183 @@ class _MarkTile extends StatelessWidget {
 
   final Mark mark;
   final int clipStartMs;
+  final bool hasVideo;
   final ValueChanged<String> onTagChanged;
   final VoidCallback onDelete;
-
-  /// Null when the session has no video yet.
   final VoidCallback? onPreview;
-
-  /// Null when the session has no video yet.
   final VoidCallback? onMatch;
 
   @override
   Widget build(BuildContext context) {
-    return _Card(
+    return AppCard(
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.base, vertical: AppSpacing.sm),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Text(
-            formatClock(mark.atMs),
-            style: AppTheme.mono(size: 18, weight: FontWeight.w700),
+          // ── Tag dot ─────────────────────────────────────────────────
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              color: AppColors.forTag(mark.tag),
+              shape: BoxShape.circle,
+            ),
           ),
-          const SizedBox(width: 16),
+          const SizedBox(width: AppSpacing.sm),
+          // ── Time + clip start ────────────────────────────────────────
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: PopupMenuButton<String>(
-                    onSelected: onTagChanged,
-                    itemBuilder: (_) => [
-                      for (final t in markTags)
-                        PopupMenuItem(value: t, child: Text(t)),
-                    ],
-                    child: _TagPill(tag: mark.tag),
-                  ),
-                ),
-                const SizedBox(height: 6),
                 Text(
-                  'Clip starts at ${formatClock(clipStartMs)}',
-                  style: AppTheme.mono(size: 12, color: AppColors.muted),
+                  formatClock(mark.atMs),
+                  style: AppTheme.mono(
+                      size: 16, weight: FontWeight.w700),
                 ),
-                if (onMatch != null) ...[
-                  const SizedBox(height: 4),
-                  TextButton(
-                    onPressed: onMatch,
-                    style: TextButton.styleFrom(
-                      padding: EdgeInsets.zero,
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    child: const Text(
-                      'Match video here',
-                      style: TextStyle(fontSize: 12),
-                    ),
-                  ),
-                ],
+                Text(
+                  'clip starts ${formatClock(clipStartMs)}',
+                  style: AppTheme.mono(
+                      size: 11, color: AppColors.muted),
+                ),
               ],
             ),
           ),
+          // ── Play button ──────────────────────────────────────────────
           if (onPreview != null)
-            IconButton(
-              tooltip: 'Preview this clip',
-              icon: const Icon(
-                Icons.play_circle_outline,
-                color: AppColors.accent,
+            Semantics(
+              label: 'Preview clip',
+              child: IconButton(
+                tooltip: 'Preview clip',
+                icon: const Icon(Icons.play_circle_outline_rounded,
+                    size: 22, color: AppColors.accent),
+                onPressed: onPreview,
               ),
-              onPressed: onPreview,
             ),
-          IconButton(
-            tooltip: 'Delete mark',
-            icon: const Icon(Icons.delete_outline, color: AppColors.muted),
-            onPressed: onDelete,
+          // ── Overflow menu ────────────────────────────────────────────
+          PopupMenuButton<_MarkAction>(
+            tooltip: 'Mark options',
+            icon: const Icon(Icons.more_vert_rounded,
+                size: 20, color: AppColors.muted),
+            onSelected: (action) =>
+                _handleAction(context, action),
+            itemBuilder: (ctx) => [
+              PopupMenuItem(
+                value: _MarkAction.changeTag,
+                child: const Text('Change tag'),
+              ),
+              if (hasVideo)
+                PopupMenuItem(
+                  value: _MarkAction.matchHere,
+                  child: const Text('Match video here'),
+                ),
+              const PopupMenuDivider(),
+              PopupMenuItem(
+                value: _MarkAction.delete,
+                child: const Text('Delete mark',
+                    style: TextStyle(color: AppColors.tagFail)),
+              ),
+            ],
           ),
         ],
       ),
     );
   }
+
+  void _handleAction(BuildContext context, _MarkAction action) {
+    switch (action) {
+      case _MarkAction.changeTag:
+        _showTagPicker(context);
+      case _MarkAction.matchHere:
+        onMatch?.call();
+      case _MarkAction.delete:
+        onDelete();
+    }
+  }
+
+  void _showTagPicker(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: AppSpacing.base),
+            const Text(
+              'Change tag',
+              style: TextStyle(
+                  fontSize: 16, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            for (final tag in markTags)
+              ListTile(
+                leading: TagPill(tag: tag),
+                onTap: () {
+                  onTagChanged(tag);
+                  Navigator.pop(ctx);
+                },
+              ),
+            const SizedBox(height: AppSpacing.sm),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
-class _TagPill extends StatelessWidget {
-  const _TagPill({required this.tag});
+enum _MarkAction { changeTag, matchHere, delete }
 
-  final String tag;
+// ─────────────────────────────────────────────────────────────────────────────
+// Error banner
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ErrorBanner extends StatelessWidget {
+  const _ErrorBanner({required this.message});
+
+  final String message;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.base, vertical: AppSpacing.sm),
       decoration: BoxDecoration(
-        color: AppColors.ink,
-        borderRadius: BorderRadius.circular(999),
+        color: AppColors.tagFail.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        border:
+            Border.all(color: AppColors.tagFail.withValues(alpha: 0.35)),
       ),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            tag,
-            style: const TextStyle(color: Colors.white, fontSize: 13),
+          const Icon(Icons.info_outline_rounded,
+              size: 16, color: AppColors.tagFail),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              message,
+              style:
+                  const TextStyle(fontSize: 13, color: AppColors.tagFail),
+            ),
           ),
-          const SizedBox(width: 4),
-          const Icon(Icons.expand_more, size: 16, color: Colors.white),
         ],
       ),
     );
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Empty marks
+// ─────────────────────────────────────────────────────────────────────────────
 
 class _EmptyMarks extends StatelessWidget {
   const _EmptyMarks();
 
   @override
   Widget build(BuildContext context) {
-    return const _Card(
+    return const AppCard(
       child: Text(
         'No marks were saved in this session.',
-        style: TextStyle(color: AppColors.muted),
+        style: TextStyle(fontSize: 13, color: AppColors.muted),
       ),
     );
   }

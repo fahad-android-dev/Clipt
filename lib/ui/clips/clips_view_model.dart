@@ -30,6 +30,9 @@ class ClipsViewModel extends ChangeNotifier {
   bool _notFound = false;
   String? _error;
 
+  /// Selected clip mark id; null until load completes.
+  int? _selectedMarkId;
+
   /// Draft trim values for smooth slider interaction (not saved yet).
   final Map<int, ({int startMs, int endMs})> _draftTrims = {};
 
@@ -39,6 +42,7 @@ class ClipsViewModel extends ChangeNotifier {
   File? get video => _video;
   int? get videoDurationMs => _videoDurationMs;
   String get title => _session?.title ?? '';
+  int? get selectedMarkId => _selectedMarkId;
 
   Future<void> load() async {
     try {
@@ -56,11 +60,26 @@ class ClipsViewModel extends ChangeNotifier {
             _video = file;
           }
         }
+        // Select the first clip after load.
+        _selectFirstValid();
       }
     } catch (_) {
       _notFound = true;
     }
     _loading = false;
+    notifyListeners();
+  }
+
+  void _selectFirstValid() {
+    final c = clips;
+    if (c.isNotEmpty) {
+      _selectedMarkId = c.first.mark.id;
+    }
+  }
+
+  /// Selects the clip with [markId] and notifies listeners.
+  void select(int markId) {
+    _selectedMarkId = markId;
     notifyListeners();
   }
 
@@ -155,8 +174,69 @@ class ClipsViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Shifts the clip's start by [deltaMs], clamping to the trim window and
+  /// keeping the duration within [minClipMs]..[maxClipMs]. Saves immediately.
+  Future<void> nudgeStart(int markId, int deltaMs) async {
+    final clip = clips.firstWhere((c) => c.mark.id == markId);
+    final newStart = (clip.startMs + deltaMs)
+        .clamp(clip.windowStartMs, clip.windowEndMs);
+    // Keep length in [minClipMs, maxClipMs]
+    final minEnd = newStart + minClipMs;
+    final maxEnd = newStart + maxClipMs;
+    final newEnd = clip.endMs.clamp(minEnd, maxEnd).clamp(
+          clip.windowStartMs,
+          clip.windowEndMs,
+        );
+    _draftTrims[markId] = (startMs: newStart, endMs: newEnd);
+    notifyListeners();
+    await saveTrim(markId);
+  }
+
+  /// Shifts the clip's end by [deltaMs], clamping to the trim window and
+  /// keeping the duration within [minClipMs]..[maxClipMs]. Saves immediately.
+  Future<void> nudgeEnd(int markId, int deltaMs) async {
+    final clip = clips.firstWhere((c) => c.mark.id == markId);
+    final newEnd = (clip.endMs + deltaMs)
+        .clamp(clip.windowStartMs, clip.windowEndMs);
+    // Keep length in [minClipMs, maxClipMs]
+    final minStart = newEnd - maxClipMs;
+    final maxStart = newEnd - minClipMs;
+    final newStart = clip.startMs.clamp(minStart, maxStart).clamp(
+          clip.windowStartMs,
+          clip.windowEndMs,
+        );
+    _draftTrims[markId] = (startMs: newStart, endMs: newEnd);
+    notifyListeners();
+    await saveTrim(markId);
+  }
+
+  /// Clears the current error message.
+  void dismissError() {
+    _error = null;
+    notifyListeners();
+  }
+
   int get includedCount => clips.where((c) => c.included).length;
   int get totalClips => clips.length;
   int get includedLengthMs =>
       clips.where((c) => c.included).fold(0, (sum, c) => sum + c.lengthMs);
+
+  /// Keeps [_selectedMarkId] valid after clips list changes.
+  void _ensureValidSelection() {
+    final c = clips;
+    if (c.isEmpty) {
+      _selectedMarkId = null;
+      return;
+    }
+    if (_selectedMarkId == null ||
+        !c.any((clip) => clip.mark.id == _selectedMarkId)) {
+      _selectedMarkId = c.first.mark.id;
+    }
+  }
+
+  @override
+  void notifyListeners() {
+    _ensureValidSelection();
+    super.notifyListeners();
+  }
 }

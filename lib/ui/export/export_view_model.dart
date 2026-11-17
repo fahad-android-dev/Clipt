@@ -96,6 +96,13 @@ class ExportViewModel extends ChangeNotifier {
   ExportLimits get limits => _limits;
   String? get errorMessage => _error;
 
+  /// Session title shown in the hero card.
+  String get sessionTitle => _session?.title ?? '';
+
+  /// Total length in ms of all included clips.
+  int get totalLengthMs =>
+      _clips.fold(0, (sum, c) => sum + c.lengthMs);
+
   Future<void> load() async {
     try {
       final session = await _sessionRepo.getSession(sessionId);

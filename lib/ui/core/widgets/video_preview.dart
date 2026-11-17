@@ -94,6 +94,25 @@ class VideoPreviewState extends State<VideoPreview> {
     return c.value.position;
   }
 
+  /// Whether the video is currently playing.
+  bool get isPlaying => _controller?.value.isPlaying ?? false;
+
+  /// Starts playback from the current position.
+  Future<void> play() async {
+    final c = _controller;
+    if (c == null || !_ready) return;
+    await c.play();
+  }
+
+  /// Toggles between play and pause.
+  Future<void> togglePlayPause() async {
+    if (isPlaying) {
+      await pause();
+    } else {
+      await play();
+    }
+  }
+
   /// Pauses playback if playing.
   Future<void> pause() async {
     final c = _controller;

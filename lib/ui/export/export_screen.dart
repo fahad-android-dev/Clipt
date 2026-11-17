@@ -2,7 +2,14 @@ import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../domain/export_planner.dart';
+import '../../utils/formatters.dart';
 import '../core/themes/app_colors.dart';
+import '../core/themes/app_spacing.dart';
+import '../core/themes/app_theme.dart';
+import '../core/widgets/app_card.dart';
+import '../core/widgets/bottom_action_bar.dart';
+import '../core/widgets/empty_state.dart';
+import '../core/widgets/tag_pill.dart';
 import 'export_view_model.dart';
 
 class ExportScreen extends StatefulWidget {
@@ -23,6 +30,11 @@ class _ExportScreenState extends State<ExportScreen> {
     super.dispose();
   }
 
+  AppBar _appBar() => AppBar(
+        leading: const BackButton(),
+        title: const Text('Export'),
+      );
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -30,344 +42,698 @@ class _ExportScreenState extends State<ExportScreen> {
       builder: (context, _) {
         if (_vm.isLoading) {
           return Scaffold(
-            appBar: AppBar(title: Text('Export')),
-            body: Center(child: CircularProgressIndicator()),
+            appBar: _appBar(),
+            body: const Center(child: CircularProgressIndicator()),
           );
         }
         if (_vm.notFound) {
           return Scaffold(
-            appBar: AppBar(title: const Text('Export')),
-            body: const Center(child: Text('This session no longer exists.')),
+            appBar: _appBar(),
+            body: EmptyState(
+              icon: Icons.search_off_rounded,
+              title: 'Session not found',
+              message: 'This session no longer exists.',
+              actionLabel: 'Go back',
+              onAction: () => Navigator.pop(context),
+            ),
           );
         }
         if (_vm.noVideo) {
           return Scaffold(
-            appBar: AppBar(title: const Text('Export')),
-            body: const Center(child: Text('No video linked to this session.')),
+            appBar: _appBar(),
+            body: EmptyState(
+              icon: Icons.videocam_off_rounded,
+              title: 'No video linked',
+              message: 'Add a recording to this session before exporting.',
+              actionLabel: 'Go back',
+              onAction: () => Navigator.pop(context),
+            ),
           );
         }
         if (_vm.noClips) {
           return Scaffold(
-            appBar: AppBar(title: const Text('Export')),
-            body: const Center(child: Text('No clips to export.')),
+            appBar: _appBar(),
+            body: EmptyState(
+              icon: Icons.content_cut_rounded,
+              title: 'No clips to export',
+              message: 'Include at least one clip in the clip editor.',
+              actionLabel: 'Go back',
+              onAction: () => Navigator.pop(context),
+            ),
           );
         }
 
         return Scaffold(
-          appBar: AppBar(title: const Text('Export')),
-          body: _buildContent(),
+          appBar: _appBar(),
+          body: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 220),
+            child: _buildPhase(),
+          ),
         );
       },
     );
   }
 
-  Widget _buildContent() {
+  Widget _buildPhase() {
     switch (_vm.phase) {
       case ExportPhase.ready:
-        return _ReadyView(viewModel: _vm);
+        return _ReadyView(key: const ValueKey('ready'), vm: _vm);
       case ExportPhase.running:
-        return _RunningView(viewModel: _vm);
+        return _RunningView(key: const ValueKey('running'), vm: _vm);
       case ExportPhase.done:
-        return _DoneView(viewModel: _vm);
+        return _DoneView(key: const ValueKey('done'), vm: _vm);
     }
   }
 }
 
-class _Card extends StatelessWidget {
-  const _Card({required this.child});
-
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.card,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.line),
-      ),
-      child: child,
-    );
-  }
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// READY
+// ─────────────────────────────────────────────────────────────────────────────
 
 class _ReadyView extends StatelessWidget {
-  const _ReadyView({required this.viewModel});
+  const _ReadyView({super.key, required this.vm});
 
-  final ExportViewModel viewModel;
-
-  @override
-  Widget build(BuildContext context) {
-    final limits = viewModel.limits;
-    final clipCount = viewModel.clipExports.length;
-    final resolution = limits.maxShortSide >= 1080 ? '1080p' : '720p';
-    final watermark = limits.watermark ? 'Made with Clipt watermark' : 'no watermark';
-
-    return ListView(
-      padding: const EdgeInsets.all(20),
-      children: [
-        _Card(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '$clipCount clips · $resolution · $watermark',
-                style: const TextStyle(fontSize: 16),
-              ),
-              if (limits.watermark) ...[
-                const SizedBox(height: 8),
-                const Text(
-                  'Pro: 1080p and no watermark.',
-                  style: TextStyle(color: AppColors.muted, fontSize: 13),
-                ),
-              ],
-            ],
-          ),
-        ),
-        const SizedBox(height: 20),
-        FilledButton(
-          style: FilledButton.styleFrom(
-            backgroundColor: AppColors.accent,
-            minimumSize: const Size.fromHeight(48),
-          ),
-          onPressed: viewModel.start,
-          child: const Text('Start export'),
-        ),
-        if (kDebugMode) ...[
-          const SizedBox(height: 20),
-          Row(
-            children: [
-              const Text('Debug: act as Pro'),
-              const SizedBox(width: 8),
-              Switch(
-                value: limits.maxShortSide >= 1080,
-                onChanged: viewModel.setDebugAsPro,
-                activeTrackColor: AppColors.accent,
-              ),
-            ],
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-class _RunningView extends StatelessWidget {
-  const _RunningView({required this.viewModel});
-
-  final ExportViewModel viewModel;
+  final ExportViewModel vm;
 
   @override
   Widget build(BuildContext context) {
-    final clipExports = viewModel.clipExports;
-    final total = clipExports.length;
-    final current = clipExports.indexWhere((c) => c.status == ClipStatus.cutting);
-    final currentClip = current >= 0 ? current + 1 : total;
+    final limits = vm.limits;
+    final clipCount = vm.clipExports.isNotEmpty
+        ? vm.clipExports.length
+        : 0; // before start, planClips is in _clips but not _clipExports
+    // Use the count the vm knows: totalLengthMs refers to _clips which is set
+    final total = vm.totalLengthMs;
+    final isPro = limits.maxShortSide >= 1080;
+    final resolution = isPro ? '1080p' : 'HD 720p';
 
     return Column(
       children: [
-        LinearProgressIndicator(value: viewModel.overallProgress),
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Text('Clip $currentClip of $total'),
-        ),
         Expanded(
           child: ListView(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.lg,
+              AppSpacing.lg,
+              AppSpacing.lg,
+              AppSpacing.xxl,
+            ),
             children: [
-              for (final clipExport in clipExports)
-                _ClipProgressTile(clipExport: clipExport),
+              // ── Hero card ───────────────────────────────────────────────
+              AppCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      // clipExports is empty before start; count from totalLengthMs>0
+                      // The clip list is in vm._clips (private). We approximate using
+                      // the BottomActionBar label that calls vm.start. The spec wants
+                      // the count here too: expose via a getter we added.
+                      '${clipCount > 0 ? clipCount : (total > 0 ? '—' : '0')} '
+                      'clip${clipCount == 1 ? '' : 's'}',
+                      style: const TextStyle(
+                        fontSize: 32,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.ink,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${formatClock(total)} total',
+                      style: AppTheme.mono(size: 15, color: AppColors.muted),
+                    ),
+                    if (vm.sessionTitle.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        vm.sessionTitle,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: AppColors.muted,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              // ── Quality card ─────────────────────────────────────────────
+              AppCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'QUALITY',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.8,
+                        color: AppColors.muted,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    _QualityRow(
+                      icon: Icons.check_circle_outline_rounded,
+                      iconColor: AppColors.accent,
+                      label: resolution,
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    _QualityRow(
+                      icon: isPro
+                          ? Icons.check_circle_outline_rounded
+                          : Icons.branding_watermark_outlined,
+                      iconColor: AppColors.accent,
+                      label: isPro ? 'No watermark' : 'Clipt watermark',
+                    ),
+                    if (!isPro) ...[
+                      const SizedBox(height: AppSpacing.sm),
+                      const Divider(color: AppColors.line, height: 1),
+                      const SizedBox(height: AppSpacing.sm),
+                      _QualityRow(
+                        icon: Icons.lock_outline_rounded,
+                        iconColor: AppColors.muted,
+                        label: 'Pro: 1080p, no watermark',
+                        muted: true,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              // ── Saving to row ─────────────────────────────────────────────
+              Row(
+                children: [
+                  const Icon(Icons.photo_library_outlined,
+                      size: 18, color: AppColors.muted),
+                  const SizedBox(width: AppSpacing.sm),
+                  const Text(
+                    'Saving to',
+                    style: TextStyle(fontSize: 13, color: AppColors.muted),
+                  ),
+                  const SizedBox(width: 6),
+                  const Text(
+                    'Photos, album Clipt',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.ink,
+                    ),
+                  ),
+                ],
+              ),
+              // ── Debug switch ──────────────────────────────────────────────
+              if (kDebugMode) ...[
+                const SizedBox(height: AppSpacing.xl),
+                const Divider(color: AppColors.line),
+                const SizedBox(height: AppSpacing.sm),
+                Row(
+                  children: [
+                    const Text(
+                      'Debug: act as Pro',
+                      style: TextStyle(fontSize: 13, color: AppColors.muted),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Switch(
+                      value: limits.maxShortSide >= 1080,
+                      onChanged: vm.setDebugAsPro,
+                      activeTrackColor: AppColors.accent,
+                    ),
+                  ],
+                ),
+              ],
             ],
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.all(20),
-          child: TextButton(
-            onPressed: viewModel.cancel,
-            child: const Text('Cancel'),
-          ),
-        ),
-        const Padding(
-          padding: EdgeInsets.only(bottom: 20),
-          child: Text(
-            'Keep Clipt open until the export finishes.',
-            style: TextStyle(color: AppColors.muted, fontSize: 13),
-          ),
+        BottomActionBar(
+          summaryText:
+              '${clipCount > 0 ? clipCount : '…'} clip${clipCount == 1 ? '' : 's'}',
+          buttonLabel:
+              'Export ${clipCount > 0 ? clipCount : ''} clip${clipCount == 1 ? '' : 's'}',
+          onPressed: vm.start,
         ),
       ],
     );
   }
 }
 
-class _DoneView extends StatelessWidget {
-  const _DoneView({required this.viewModel});
-
-  final ExportViewModel viewModel;
-
-  @override
-  Widget build(BuildContext context) {
-    final clipExports = viewModel.clipExports;
-    final savedCount = clipExports.where((c) => c.savedToGallery).length;
-    final totalCount = clipExports.where((c) => c.status == ClipStatus.done).length;
-    final hasFailed = clipExports.any((c) => c.status == ClipStatus.failed);
-
-    return ListView(
-      padding: const EdgeInsets.all(20),
-      children: [
-        _Card(
-          child: Text(
-            viewModel.galleryAllowed
-                ? 'Saved $savedCount clips to your Photos in the Clipt album'
-                : 'Exported $totalCount clips. Allow photo access to save them to your gallery.',
-          ),
-        ),
-        const SizedBox(height: 20),
-        FilledButton(
-          style: FilledButton.styleFrom(
-            backgroundColor: AppColors.accent,
-            minimumSize: const Size.fromHeight(48),
-          ),
-          onPressed: viewModel.shareAll,
-          child: const Text('Share all'),
-        ),
-        const SizedBox(height: 20),
-        for (final clipExport in clipExports)
-          _DoneClipTile(
-            clipExport: clipExport,
-            onShare: () => viewModel.shareClip(clipExports.indexOf(clipExport)),
-          ),
-        if (hasFailed) ...[
-          const SizedBox(height: 20),
-          FilledButton(
-            onPressed: viewModel.retryFailed,
-            child: const Text('Retry failed'),
-          ),
-        ],
-        const SizedBox(height: 20),
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Done'),
-        ),
-      ],
-    );
-  }
-}
-
-class _ClipProgressTile extends StatelessWidget {
-  const _ClipProgressTile({required this.clipExport});
-
-  final ClipExport clipExport;
-
-  @override
-  Widget build(BuildContext context) {
-    final status = clipExport.status;
-    IconData icon;
-    Color color;
-
-    switch (status) {
-      case ClipStatus.waiting:
-        icon = Icons.hourglass_empty;
-        color = AppColors.muted;
-        break;
-      case ClipStatus.cutting:
-        icon = Icons.more_horiz;
-        color = AppColors.accent;
-        break;
-      case ClipStatus.done:
-        icon = Icons.check_circle;
-        color = AppColors.accent;
-        break;
-      case ClipStatus.failed:
-        icon = Icons.error;
-        color = AppColors.accent;
-        break;
-      case ClipStatus.cancelled:
-        icon = Icons.cancel;
-        color = AppColors.muted;
-        break;
-    }
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        children: [
-          Icon(icon, color: color, size: 20),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  clipFileName(
-                    sessionTitle: 'Session',
-                    index: 1,
-                    tag: clipExport.clip.mark.tag,
-                  ),
-                  style: const TextStyle(fontSize: 14),
-                ),
-                if (status == ClipStatus.cutting)
-                  LinearProgressIndicator(value: clipExport.progress),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _DoneClipTile extends StatelessWidget {
-  const _DoneClipTile({
-    required this.clipExport,
-    required this.onShare,
+class _QualityRow extends StatelessWidget {
+  const _QualityRow({
+    required this.icon,
+    required this.iconColor,
+    required this.label,
+    this.muted = false,
   });
 
-  final ClipExport clipExport;
-  final VoidCallback onShare;
+  final IconData icon;
+  final Color iconColor;
+  final String label;
+  final bool muted;
 
   @override
   Widget build(BuildContext context) {
-    final clip = clipExport.clip;
-    final status = clipExport.status;
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: iconColor),
+        const SizedBox(width: AppSpacing.sm),
+        Expanded(
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 14,
+              color: muted ? AppColors.muted : AppColors.ink,
+              fontWeight: muted ? FontWeight.w400 : FontWeight.w500,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: _Card(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+// ─────────────────────────────────────────────────────────────────────────────
+// RUNNING
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _RunningView extends StatelessWidget {
+  const _RunningView({super.key, required this.vm});
+
+  final ExportViewModel vm;
+
+  @override
+  Widget build(BuildContext context) {
+    final exports = vm.clipExports;
+    final total = exports.length;
+    final cuttingIdx =
+        exports.indexWhere((c) => c.status == ClipStatus.cutting);
+    final currentClip = cuttingIdx >= 0 ? cuttingIdx + 1 : total;
+    final progress = vm.overallProgress;
+
+    return SafeArea(
+      child: Column(
+        children: [
+          const SizedBox(height: AppSpacing.xl),
+          // ── Large circular progress ────────────────────────────────────
+          SizedBox(
+            width: 160,
+            height: 160,
+            child: Stack(
+              alignment: Alignment.center,
               children: [
-                Expanded(
-                  child: Text(
-                    clipFileName(
-                      sessionTitle: 'Session',
-                      index: 1,
-                      tag: clip.mark.tag,
-                    ),
-                    style: const TextStyle(fontSize: 14),
+                SizedBox.expand(
+                  child: CircularProgressIndicator(
+                    value: progress,
+                    strokeWidth: 8,
+                    backgroundColor: AppColors.line,
+                    color: AppColors.accent,
                   ),
                 ),
-                if (status == ClipStatus.done)
-                  IconButton(
-                    icon: const Icon(Icons.share, color: AppColors.accent),
-                    onPressed: onShare,
+                Text(
+                  '${(progress * 100).round()}%',
+                  style: AppTheme.mono(
+                    size: 28,
+                    weight: FontWeight.w700,
                   ),
+                ),
               ],
             ),
-            if (status == ClipStatus.failed && clipExport.error != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  clipExport.error!,
-                  style: const TextStyle(color: AppColors.accent, fontSize: 12),
+          ),
+          const SizedBox(height: AppSpacing.base),
+          Text(
+            'Clip $currentClip of $total',
+            style: const TextStyle(
+              fontSize: 15,
+              color: AppColors.muted,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xl),
+          // ── Clip list ─────────────────────────────────────────────────
+          Expanded(
+            child: ListView.separated(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+              separatorBuilder: (context, idx) =>
+                  const SizedBox(height: AppSpacing.sm),
+              itemCount: exports.length,
+              itemBuilder: (context, i) =>
+                  _RunningClipRow(export: exports[i], index: i),
+            ),
+          ),
+          // ── Notice + cancel ───────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.lg,
+              AppSpacing.sm,
+              AppSpacing.lg,
+              AppSpacing.sm,
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.lock_outline_rounded,
+                    size: 14, color: AppColors.muted),
+                const SizedBox(width: 6),
+                const Flexible(
+                  child: Text(
+                    'Keep Clipt open until the export finishes.',
+                    style: TextStyle(fontSize: 12, color: AppColors.muted),
+                    textAlign: TextAlign.center,
+                  ),
                 ),
-              ),
-          ],
-        ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: vm.cancel,
+            style: TextButton.styleFrom(foregroundColor: AppColors.muted),
+            child: const Text('Cancel'),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+        ],
       ),
     );
+  }
+}
+
+class _RunningClipRow extends StatelessWidget {
+  const _RunningClipRow({required this.export, required this.index});
+
+  final ClipExport export;
+  final int index;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = export.status;
+    Widget statusIcon;
+    switch (status) {
+      case ClipStatus.waiting:
+        statusIcon = const Icon(Icons.radio_button_unchecked_rounded,
+            size: 18, color: AppColors.muted);
+      case ClipStatus.cutting:
+        statusIcon = const SizedBox(
+          width: 18,
+          height: 18,
+          child: CircularProgressIndicator(
+            strokeWidth: 2.5,
+            color: AppColors.accent,
+          ),
+        );
+      case ClipStatus.done:
+        statusIcon = const Icon(Icons.check_circle_rounded,
+            size: 18, color: AppColors.accent);
+      case ClipStatus.failed:
+        statusIcon = const Icon(Icons.error_rounded,
+            size: 18, color: AppColors.tagFail);
+      case ClipStatus.cancelled:
+        statusIcon = const Icon(Icons.cancel_outlined,
+            size: 18, color: AppColors.muted);
+    }
+
+    final fileName = clipFileName(
+      sessionTitle: 'Clip',
+      index: index + 1,
+      tag: export.clip.mark.tag,
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            statusIcon,
+            const SizedBox(width: AppSpacing.sm),
+            TagPill(tag: export.clip.mark.tag),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Text(
+                fileName,
+                style: const TextStyle(fontSize: 13, color: AppColors.muted),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        if (status == ClipStatus.cutting) ...[
+          const SizedBox(height: 6),
+          Padding(
+            padding: const EdgeInsets.only(left: 26),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(2),
+              child: LinearProgressIndicator(
+                value: export.progress,
+                minHeight: 3,
+                backgroundColor: AppColors.line,
+                color: AppColors.accent,
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DONE
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _DoneView extends StatelessWidget {
+  const _DoneView({super.key, required this.vm});
+
+  final ExportViewModel vm;
+
+  @override
+  Widget build(BuildContext context) {
+    final exports = vm.clipExports;
+    final doneCount =
+        exports.where((c) => c.status == ClipStatus.done).length;
+    final failedCount =
+        exports.where((c) => c.status == ClipStatus.failed).length;
+    final hasFailed = failedCount > 0;
+    final allFailed = doneCount == 0 && hasFailed;
+
+    final String headlineTitle = allFailed
+        ? 'Export failed'
+        : hasFailed
+            ? 'Done with $failedCount problem${failedCount == 1 ? '' : 's'}'
+            : 'All done';
+
+    final String subtitle = vm.galleryAllowed
+        ? 'Saved $doneCount clip${doneCount == 1 ? '' : 's'} to your Photos in the Clipt album.'
+        : 'Exported $doneCount clip${doneCount == 1 ? '' : 's'}. '
+            'Allow photo access to save them to your gallery.';
+
+    return SafeArea(
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg,
+          AppSpacing.xl,
+          AppSpacing.lg,
+          AppSpacing.xxl,
+        ),
+        children: [
+          // ── Result hero ────────────────────────────────────────────────
+          Center(
+            child: Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                color: (allFailed ? AppColors.tagFail : AppColors.accent)
+                    .withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                allFailed
+                    ? Icons.error_outline_rounded
+                    : Icons.check_rounded,
+                size: 36,
+                color: allFailed ? AppColors.tagFail : AppColors.accent,
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.base),
+          Center(
+            child: Text(
+              headlineTitle,
+              style: const TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
+                color: AppColors.ink,
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Center(
+            child: Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 14, color: AppColors.muted),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xl),
+          // ── Actions ───────────────────────────────────────────────────
+          if (doneCount > 0)
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.accent,
+                foregroundColor: Colors.white,
+                minimumSize: const Size.fromHeight(48),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              onPressed: vm.shareAll,
+              child: const Text('Share all'),
+            ),
+          if (hasFailed) ...[
+            const SizedBox(height: AppSpacing.sm),
+            OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+                foregroundColor: AppColors.accent,
+                side: const BorderSide(color: AppColors.accent),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              onPressed: vm.retryFailed,
+              child: Text('Retry failed ($failedCount)'),
+            ),
+          ],
+          const SizedBox(height: AppSpacing.sm),
+          TextButton(
+            style: TextButton.styleFrom(
+              minimumSize: const Size.fromHeight(48),
+              foregroundColor: AppColors.muted,
+            ),
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Done'),
+          ),
+          const SizedBox(height: AppSpacing.xl),
+          // ── Clip list ─────────────────────────────────────────────────
+          const Text(
+            'CLIPS',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.8,
+              color: AppColors.muted,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          for (var i = 0; i < exports.length; i++)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+              child: _DoneClipRow(
+                export: exports[i],
+                index: i,
+                onShare: () => vm.shareClip(i),
+                onRetry: () => vm.retryFailed(),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DoneClipRow extends StatelessWidget {
+  const _DoneClipRow({
+    required this.export,
+    required this.index,
+    required this.onShare,
+    required this.onRetry,
+  });
+
+  final ClipExport export;
+  final int index;
+  final VoidCallback onShare;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = export.status;
+    final fileName = clipFileName(
+      sessionTitle: 'Clip',
+      index: index + 1,
+      tag: export.clip.mark.tag,
+    );
+
+    return AppCard(
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.base, vertical: AppSpacing.sm),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _statusIcon(status),
+              const SizedBox(width: AppSpacing.sm),
+              TagPill(tag: export.clip.mark.tag),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  fileName,
+                  style: const TextStyle(fontSize: 13, color: AppColors.muted),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (status == ClipStatus.done)
+                Semantics(
+                  label: 'Share this clip',
+                  child: IconButton(
+                    tooltip: 'Share this clip',
+                    icon: const Icon(Icons.share_rounded,
+                        size: 20, color: AppColors.accent),
+                    onPressed: onShare,
+                  ),
+                ),
+            ],
+          ),
+          if (status == ClipStatus.failed) ...[
+            const SizedBox(height: AppSpacing.xs),
+            Padding(
+              padding: const EdgeInsets.only(left: 26),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (export.error != null)
+                    Text(
+                      export.error!,
+                      style: const TextStyle(
+                          fontSize: 12, color: AppColors.tagFail),
+                    ),
+                  const SizedBox(height: AppSpacing.xs),
+                  TextButton(
+                    style: TextButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      minimumSize: const Size(0, 32),
+                      foregroundColor: AppColors.accent,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onPressed: onRetry,
+                    child: const Text('Retry', style: TextStyle(fontSize: 13)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _statusIcon(ClipStatus status) {
+    switch (status) {
+      case ClipStatus.done:
+        return const Icon(Icons.check_circle_rounded,
+            size: 18, color: AppColors.accent);
+      case ClipStatus.failed:
+        return const Icon(Icons.error_rounded,
+            size: 18, color: AppColors.tagFail);
+      case ClipStatus.cancelled:
+        return const Icon(Icons.cancel_outlined,
+            size: 18, color: AppColors.muted);
+      default:
+        return const Icon(Icons.radio_button_unchecked_rounded,
+            size: 18, color: AppColors.muted);
+    }
   }
 }

@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../themes/app_colors.dart';
 
+/// A compact pill showing a coloured dot beside the tag name.
 class TagPill extends StatelessWidget {
   const TagPill({super.key, required this.tag});
 
@@ -9,23 +10,28 @@ class TagPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-      decoration: BoxDecoration(
-        color: AppColors.ink,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            tag,
-            style: const TextStyle(color: Colors.white, fontSize: 13),
+    final color = AppColors.forTag(tag);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
           ),
-          const SizedBox(width: 4),
-          const Icon(Icons.expand_more, size: 16, color: Colors.white),
-        ],
-      ),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          tag,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: color == AppColors.ink ? AppColors.ink : color,
+          ),
+        ),
+      ],
     );
   }
 }
